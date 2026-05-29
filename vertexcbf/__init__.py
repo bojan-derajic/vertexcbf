@@ -1,6 +1,6 @@
 from .dynamics import *
 from .constraint import *
-from .mpc import *
+from .trajopt import *
 from .models import MLP
 from .losses import data_loss, pde_loss
 from .trainer import Trainer

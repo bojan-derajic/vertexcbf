@@ -42,7 +42,7 @@ from vertexcbf.dynamics import (
     VerticalDrone2D,
 )
 from vertexcbf.models import MLP
-from vertexcbf.mpc import (
+from vertexcbf.trajopt import (
     beam_search,
     stochastic_beam_search,
     branch_and_bound,
@@ -96,7 +96,7 @@ CONSTR_REGISTRY: dict[str, Callable] = {
     "two_disk_sdf": two_disk_sdf,
 }
 
-MPC_REGISTRY: dict[str, Callable] = {
+TRAJOPT_REGISTRY: dict[str, Callable] = {
     "beam_search": beam_search,
     "stochastic_beam_search": stochastic_beam_search,
     "branch_and_bound": branch_and_bound,
@@ -133,7 +133,7 @@ def method_group(data_cfg: dict | None, no_data_override: bool = False) -> str:
     if method in _VRC_METHODS:
         return "VRC_DATA"
     raise ValueError(
-        f"Cannot map MPC method '{method}' to a paper group. "
+        f"Cannot map trajopt method '{method}' to a paper group. "
         f"Expected one of {sorted(_FC_METHODS | _VRC_METHODS)}."
     )
 
@@ -146,7 +146,7 @@ def method_group(data_cfg: dict | None, no_data_override: bool = False) -> str:
 _BEAM_METHODS = {"beam_search", "stochastic_beam_search", "branch_and_bound"}
 
 
-def build_mpc_runner(
+def build_trajopt_runner(
     data_cfg: dict,
     dynamics: "ControlAffine",
     constr_fn: Callable,
@@ -176,17 +176,18 @@ def build_mpc_runner(
 
     Returns:
         A callable ``run(states) -> Tensor`` that returns the ``"values"``
-        tensor (shape ``(N,)``) from the selected MPC method.
+        tensor (shape ``(N,)``) from the selected method.
 
     Raises:
-        KeyError: If ``method`` is not in :data:`MPC_REGISTRY`.
+        KeyError: If ``method`` is not in :data:`TRAJOPT_REGISTRY`.
     """
     method_name = data_cfg.get("method", "beam_search")
-    if method_name not in MPC_REGISTRY:
+    if method_name not in TRAJOPT_REGISTRY:
         raise KeyError(
-            f"Unknown MPC method '{method_name}'. " f"Available: {sorted(MPC_REGISTRY)}"
+            f"Unknown trajopt method '{method_name}'. "
+            f"Available: {sorted(TRAJOPT_REGISTRY)}"
         )
-    fn = MPC_REGISTRY[method_name]
+    fn = TRAJOPT_REGISTRY[method_name]
     B = data_cfg["B"]
     K = data_cfg["K"]
     dt = data_cfg["dt"]

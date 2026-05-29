@@ -54,10 +54,10 @@ from vertexcbf.config_utils import (
     build_constr_fn,
     build_dynamics,
     build_model,
-    build_mpc_runner,
+    build_trajopt_runner,
     method_group,
 )
-from vertexcbf.mpc._utils import _format_hms, progress_context
+from vertexcbf.trajopt._utils import _format_hms, progress_context
 from vertexcbf.trainer import Trainer
 from vertexcbf.validation import validate_cbf, stratified_sample_by_predicted_cbf
 
@@ -88,7 +88,7 @@ def _get_data(cfg: dict, dynamics, constr_fn, device: torch.device, reuse_data: 
         os.remove(cache_path)
         print(f"Removed existing cache: {cache_path}")
 
-    # Run the configured MPC method and cache the result for future runs
+    # Run the configured trajopt method and cache the result for future runs
     method = data_cfg.get("method", "beam_search")
     sampling = data_cfg.get("sampling", "grid")
     if sampling == "random":
@@ -110,12 +110,12 @@ def _get_data(cfg: dict, dynamics, constr_fn, device: torch.device, reuse_data: 
             grid_shape=grid_shape, requires_grad=False
         ).reshape(-1, dynamics.nx)
 
-    run_mpc = build_mpc_runner(data_cfg, dynamics, constr_fn)
+    run_trajopt = build_trajopt_runner(data_cfg, dynamics, constr_fn)
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     t_gen_start = time.time()
     with progress_context("Data generation"):
-        values = run_mpc(states)
+        values = run_trajopt(states)
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     t_data = time.time() - t_gen_start

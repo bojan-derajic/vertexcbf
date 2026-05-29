@@ -46,7 +46,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from vertexcbf.dynamics.control_affine import ControlAffine
-from vertexcbf.mpc._utils import _auto_batch_size, run_in_batches, _warmup_cuda
+from vertexcbf.trajopt._utils import _auto_batch_size, run_in_batches, _warmup_cuda
 
 
 def _peak_bytes_validate(

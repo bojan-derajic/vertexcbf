@@ -22,7 +22,7 @@ _progress_state: dict = {"enabled": False, "desc": ""}
 def progress_context(desc: str):
     """Enable a progress bar inside :func:`run_in_batches` for the duration.
 
-    ``run_in_batches`` is the natural granularity for long MPC / validation
+    ``run_in_batches`` is the natural granularity for long trajopt / validation
     workloads: it iterates over chunks of initial states sized to the GPU
     memory budget.  Wrapping a top-level call (e.g. data generation) in this
     context manager makes every nested ``run_in_batches`` render a stderr

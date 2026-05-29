@@ -34,7 +34,7 @@ import yaml
 from vertexcbf.config_utils import (
     build_constr_fn,
     build_dynamics,
-    build_mpc_runner,
+    build_trajopt_runner,
     method_group,
 )
 
@@ -106,8 +106,8 @@ def main() -> None:
             f"(grid {grid_shape}, B={data_cfg['B']}, K={data_cfg['K']}, dt={data_cfg['dt']})..."
         )
 
-    run_mpc = build_mpc_runner(data_cfg, dynamics, constr_fn)
-    values = run_mpc(states)
+    run_trajopt = build_trajopt_runner(data_cfg, dynamics, constr_fn)
+    values = run_trajopt(states)
 
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     torch.save(

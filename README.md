@@ -59,7 +59,7 @@ automatically.
 vertexcbf/
 ├── vertexcbf/                  # Core library
 │   ├── dynamics/               # ControlAffine + concrete systems
-│   ├── mpc/                    # Supervision-label generation (see note below)
+│   ├── trajopt/                # Supervision-label generation (see note below)
 │   ├── models.py               # MLP with input preprocessing
 │   ├── constraint/             # Constraint / SDF functions (one file per constraint)
 │   │   ├── interval.py
@@ -83,13 +83,12 @@ vertexcbf/
 └── pyproject.toml
 ```
 
-> **On the `mpc/` folder.** Supervision labels come from a vertex-restricted
-> tree search over the control space, *not* from classical MPC. The methods live
-> under `mpc/` because they share the receding-horizon, trajectory-optimization
-> structure of MPC (finite horizon, control sequences scored by a running
-> objective). The folder holds the three vertex-restricted tree-search methods
-> (`beam_search`, `stochastic_beam_search`, `branch_and_bound`) plus `mppi`, the
-> full-control sampling-based MPC baseline.
+> **On the `trajopt/` folder.** All methods here solve the same finite-horizon
+> trajectory-optimization problem over control sequences —
+> `max_{u₀…u_{K-1}} min_k c(x_k)` — to produce supervision labels. They differ
+> only in *how* they optimize: the three vertex-restricted tree-search methods
+> (`beam_search`, `stochastic_beam_search`, `branch_and_bound`) search over the
+> control vertices, while `mppi` is the full-control sampling-based MPC baseline.
 
 Running the scripts creates the following directories (all git-ignored and
 fully regenerable — nothing here is shipped with the repo):
