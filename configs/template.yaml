@@ -1,0 +1,241 @@
+# VertexCBF experiment configuration template
+# Copy this file and fill in the values for your system.
+# All fields marked [required] must be provided.
+
+# ---------------------------------------------------------------------------
+# System dynamics
+# ---------------------------------------------------------------------------
+system:
+  name: DoubleIntegrator1D   # [required] class name from vertexcbf.dynamics
+                              # Options: DoubleIntegrator1D, DoubleIntegrator2D,
+                              #          DoubleIntegrator3D, InvertedPendulum,
+                              #          VerticalDrone2D, DubinsCar, DynamicUnicycle,
+                              #          RelativeUnicycle, KinematicBicycle, CartPole,
+                              #          Manipulator3DOF, LandingRocket, QuadrupedTrunk,
+                              #          AUV6DoF, Quadrotor
+
+  x_min: [-1.5, -1.5]        # [required] lower state bounds (length == nx)
+  x_max: [ 1.5,  1.5]        # [required] upper state bounds (length == nx)
+  u_min: [-0.5]               # [required] lower control bounds (length == nu)
+  u_max: [ 0.5]               # [required] upper control bounds (length == nu)
+
+  # System-specific physical parameters forwarded to the class constructor.
+  # Leave empty ({}) for systems with no extra params (e.g. DoubleIntegrator).
+  params: {}
+  # Example for InvertedPendulum:
+  #   params: {m: 2.0, l: 1.0, gravity: 9.81}
+
+# ---------------------------------------------------------------------------
+# Constraint function (defines the safe set)
+# ---------------------------------------------------------------------------
+constraint:
+  type: interval_sdf   # [required] Options: interval_sdf, circle_sdf,
+                        #                     rectangle_sdf, state_limits_sdf,
+                        #                     cylinder_sdf
+  params:              # keyword args forwarded to the constraint function
+    center: 0.0
+    d: 1.0
+  # interval_sdf params:     center (float), d (half-width float)
+  # circle_sdf params:       center ([cx, cy] list), radius (float)
+  # rectangle_sdf params:    center ([cx, cy] list), a (half-x), b (half-y)
+  # state_limits_sdf params: limits (dict {state_idx: [lo, hi]}; lo or hi may
+  #                          be null for one-sided), alpha (softmin temp, default 10.0)
+  #   Example: limits: {0: [-1.0, 1.0], 2: [null, 0.5], 3: [0.0, null]}
+  # cylinder_sdf params:     center ([x, y, z] list — point on axis),
+  #                          direction ([dx, dy, dz] list — axis direction),
+  #                          radius (float)
+
+# ---------------------------------------------------------------------------
+# Precomputed supervision data
+# ---------------------------------------------------------------------------
+data:
+  enabled: false         # set to false to train with PDE loss only
+
+  # How to sample the state space for supervision targets.
+  # Options: "grid" (default) or "random"
+  sampling: grid
+
+  # Used when sampling: grid — one int per state dimension
+  grid_shape: [30, 30]
+
+  # Used when sampling: random — total number of random states
+  # num_samples: 900
+
+  # MPC method used to compute supervision targets.
+  # Options: beam_search, stochastic_beam_search, random_shooting,
+  #          mppi, cem, cem_discrete, icem, branch_and_bound
+  method: beam_search
+
+  # Common hyperparameters
+  B: 60                 # budget: beam width (beam methods) / number of trajectories (shooting methods)
+  K: 20                 # prediction horizon (steps)
+  dt: 0.2               # Euler integration time step
+
+  # Method-specific hyperparameters (all have sensible defaults; omit to use them).
+  # Uncomment and fill in only the block matching the chosen method.
+  method_params: {}
+
+  # stochastic_beam_search:
+  #   method_params:
+  #     strategy: gumbel_topk   # softmax | gumbel_topk | rank | epsilon_greedy
+  #     temperature: 1.0
+  #     epsilon: 0.1
+
+  # mppi:
+  #   method_params:
+  #     sigma: 0.5              # Gaussian noise std (scalar or per-control-dim)
+  #     lam: 1.0                # temperature — lower = more greedy
+  #     n_iter: 1               # refinement iterations
+
+  # cem:
+  #   method_params:
+  #     n_iter: 5               # refinement iterations
+  #     elite_frac: 0.1         # fraction of B kept as elite
+
+  # icem:
+  #   method_params:
+  #     n_iter: 5
+  #     elite_frac: 0.1
+  #     noise_beta: 0.9         # AR(1) temporal correlation (0=i.i.d., near-1=smooth)
+
+  # branch_and_bound:
+  #   method_params:
+  #     n_restarts: 3           # BnB passes; pass 1 primes the global lower bound,
+  #                             # subsequent passes exploit tighter pruning
+  #     tie_noise: 1.0e-6       # noise std for tie-breaking in passes 2+ (0=deterministic)
+
+
+# ---------------------------------------------------------------------------
+# PDE grid
+# ---------------------------------------------------------------------------
+pde:
+  # How to discretize the state space for PDE loss.
+  # Options: "grid" (default) or "random"
+  sampling: grid
+
+  # Used when sampling: grid — one int per state dimension
+  grid_shape: [100, 100]
+
+  # Used when sampling: random — total number of random states
+  # num_samples: 10000
+
+# ---------------------------------------------------------------------------
+# Model architecture
+# ---------------------------------------------------------------------------
+model:
+  # layers: list of [output_size, activation] pairs.
+  # First entry must be [input_dim, null] (activation ignored).
+  # Activation can be:
+  #   - a plain string:          "tanh", "relu", "sin", "elu", "linear", ...
+  #   - a two-element list:      ["softplus", {beta: 10.0}]
+  layers:
+    - [2, null]                        # input_dim = nx (for non-periodic)
+    - [32, "sin"]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [1, ["softplus", {beta: 1.0}]]   # output: r(x) >= 0
+
+  rescale_inputs: true   # rescale non-periodic states to [-1, 1]
+
+# ---------------------------------------------------------------------------
+# Training hyperparameters
+# ---------------------------------------------------------------------------
+training:
+  epochs: 10000
+  lr: 0.001
+
+  # Learning-rate schedule: decay lr by lr_gamma at each milestone epoch.
+  # Set to [] for no decay.
+  lr_milestones: [10000]
+  lr_gamma: 0.1
+
+  # Loss weighting mode.  Options:
+  #   "fixed"      — total = pde_weight * pde_loss + (1 - pde_weight) * data_loss
+  #   "normalized" — total = pde_loss / L_pde_0 + data_loss / L_data_0
+  #                  (each term divided by its value at epoch 0, so both start at 1).
+  #                  pde_weight and pde_weight_milestones are ignored.
+  #   "scheduled"  — like "fixed" but pde_weight steps at specified epochs,
+  #                  analogously to the learning-rate schedule.
+  #                  If pde_weight_milestones is empty, stays constant.
+  pde_weight_mode: fixed
+
+  # Initial (or fixed) PDE loss weight in [0, 1].
+  # Ignored when pde_weight_mode is "normalized".
+  pde_weight: 0.5
+
+  # Scheduled weight milestones (used only with pde_weight_mode: scheduled).
+  # Each entry is [epoch, new_pde_weight].  Must be in ascending epoch order.
+  # Example: step from 0.2 → 0.5 at epoch 5000, then → 1.0 at epoch 8000:
+  #   pde_weight_milestones:
+  #     - [5000, 0.5]
+  #     - [8000, 1.0]
+  pde_weight_milestones: []
+
+# ---------------------------------------------------------------------------
+# Closed-loop validation (run after training)
+# ---------------------------------------------------------------------------
+# Rolls out the Hamiltonian-greedy policy from a population of initial states
+# and reports two per-predicted-class precisions:
+#   • predicted_safe   precision = P(min_k c(x_k) > 0 | V(x_0) > 0)
+#   • predicted_unsafe precision = P(min_k c(x_k) ≤ 0 | V(x_0) ≤ 0)
+# Their complements are the false-safe rate and false-unsafe rate.
+# Forwarded to vertexcbf.validate_cbf.
+validation:
+  enabled: false        # set to true to run validation after training
+
+  # Rollout horizon and Euler step (seconds).  n_steps = round(T / dt).
+  T: 5.0
+  dt: 0.05
+
+  # How to sample the initial states for validation.
+  # Recommended: "stratified" — rejection-samples num_per_stratum points
+  # uniformly within each of {V > 0} and {V ≤ 0} so per-stratum precision
+  # estimates have similar variance regardless of class imbalance.
+  # Also accepted: "random" (uniform over the state box) or "grid".
+  sampling: stratified
+
+  # Used when sampling: stratified — target count per predicted-class stratum
+  num_per_stratum: 5000
+
+  # Used when sampling: stratified — hard cap on candidates examined,
+  # expressed as a multiplier of num_per_stratum.  If one stratum is
+  # vanishingly rare under the current model, sampling stops early and
+  # the actual counts are reported in validation.json.
+  # max_oversample: 100
+
+  # Used when sampling: grid — one int per state dimension
+  # grid_shape: [50, 50]
+
+  # Used when sampling: random — total number of random states
+  # num_samples: 5000
+
+  # Optional: max number of initial states processed per GPU call.
+  # Leave unset (or null) to auto-select from free memory on CUDA.
+  # batch_size: 1024
+
+  # Where to save validation results.  Default: <checkpoint_dir>/validation.pt
+  # The .pt file holds tensors (states, values, initial_cbf, optional
+  # trajectories) for plotting, and a sibling .json holds the stratified
+  # metrics + metadata for tabular aggregation across runs.
+  # output_path: results/my_system_validation.pt
+
+  # Also save full state and control trajectories in the .pt file.  These
+  # can be large — disable unless you need them for trajectory plots.
+  save_trajectories: false
+
+# ---------------------------------------------------------------------------
+# Output / checkpointing
+# ---------------------------------------------------------------------------
+# Default checkpoint_dir is checkpoints/<METHOD_GROUP>/<system_name>, where
+# METHOD_GROUP is derived automatically from the data section:
+#   NO_DATA — data.enabled: false (or --no-data on the CLI)
+#   FC_DATA — data.method ∈ {mppi, cem, icem, random_shooting}
+#   VRC_DATA — data.method ∈ {beam_search, stochastic_beam_search,
+#                            branch_and_bound, cem_discrete}
+# Precomputed supervision data is similarly routed to
+# data/precomputed/<METHOD_GROUP>/<system_name>.pt.
+output:
+  # checkpoint_dir: checkpoints/custom_dir      # override default routing
+  checkpoint_every: 1000                       # save every N epochs
+  log_every: 20                                # print loss every N epochs

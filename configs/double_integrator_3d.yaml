@@ -1,0 +1,64 @@
+system:
+  name: DoubleIntegrator3D
+  x_min: [-3.0, -3.0, -3.0, -2.0, -2.0, -2.0]
+  x_max: [ 3.0,  3.0,  3.0,  2.0,  2.0,  2.0]
+  u_min: [-1.0, -1.0, -1.0]
+  u_max: [ 1.0,  1.0,  1.0]
+  params: {}
+
+constraint:
+  type: ball_3d_sdf
+  params:
+    center: [0.0, 0.0, 0.0]
+    radius: 1.0
+
+data:
+  enabled: true
+  sampling: random
+  num_samples: 400000
+  method: stochastic_beam_search
+  method_params:
+   strategy: gumbel_topk
+   temperature: 0.05
+  # method: mppi
+  B: 600
+  K: 80
+  dt: 0.05
+  # method_params:
+  #   sigma: [0.35, 0.35, 0.35]
+  #   lam: 0.0
+  #   n_iter: 5
+
+pde:
+  sampling: random
+  num_samples: 600000
+
+model:
+  layers:
+    - [6, null]
+    - [64, "sin"]
+    - [64, "sin"]
+    - [64, "sin"]
+    - [64, "sin"]
+    - [1, ["softplus", {beta: 10.0}]]
+  rescale_inputs: true
+
+training:
+  epochs: 10000
+  lr: 0.001
+  lr_milestones: [8000]
+  lr_gamma: 0.1
+  pde_weight_mode: normalized
+  pde_weight: 0.0
+  pde_weight_milestones: []
+
+validation:
+  enabled: true
+  T: 5.0
+  dt: 0.005
+  sampling: stratified
+  num_per_stratum: 500000
+
+output:
+  checkpoint_every: 1000
+  log_every: 20

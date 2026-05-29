@@ -1,0 +1,62 @@
+system:
+  name: DoubleIntegrator1D
+  x_min: [-1.5, -1.5]
+  x_max: [ 1.5,  1.5]
+  u_min: [-0.5]
+  u_max: [ 0.5]
+  params: {}
+
+constraint:
+  type: interval_sdf
+  params:
+    center: 0.0
+    d: 1.0
+
+data:
+  enabled: true
+  sampling: grid
+  grid_shape: [50, 50]
+  method: stochastic_beam_search
+  method_params:
+    temperature: 0.05
+  # method: mppi
+  B: 1500
+  K: 40
+  dt: 0.1
+  # method_params:
+  #   sigma: 0.175
+  #   lam: 0.0
+  #   n_iter: 5
+
+pde:
+  sampling: random
+  num_samples: 10000
+
+model:
+  layers:
+    - [2, null]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [1, ["softplus", {beta: 1.0}]]
+  rescale_inputs: true
+
+training:
+  epochs: 10000
+  lr: 0.001
+  lr_milestones: [8000]
+  lr_gamma: 0.1
+  pde_weight_mode: fixed
+  pde_weight: 0.9
+
+validation:
+  enabled: true
+  T: 4.0
+  dt: 0.01
+  sampling: stratified
+  num_per_stratum: 10000
+
+output:
+  checkpoint_every: 1000
+  log_every: 20

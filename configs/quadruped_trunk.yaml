@@ -1,0 +1,106 @@
+# Centroidal trunk model of a quadruped in quasi-static all-four-feet stance.
+#
+# Convention: world frame ENU (z-up); body frame x-forward, y-left, z-up.
+#   (px, py, psi) are dropped from the state: they are uncontrolled in this
+#   contact mode and play no role in the tip-over / clearance safety story.
+# State (9): [pz, phi, theta, vx, vy, vz, p, q, r]
+# Input (4): [F1, F2, F3, F4]   -- body-frame normal contact forces at the
+#                                  four feet in order (FL, FR, RL, RR).
+#
+# Safety constraint: stay inside the "don't fall" box:
+#   trunk height in [0.18, 0.42] m,  |roll| <= 0.4 rad,  |pitch| <= 0.4 rad.
+
+system:
+  name: QuadrupedTrunk
+  # State bounds:
+  #   pz             : [0.05, 0.55] m   (nominal stance ~0.30 m)
+  #   phi  (roll)    : [-0.6, 0.6] rad  (~34 deg)
+  #   theta (pitch)  : [-0.6, 0.6] rad
+  #   vx, vy         : [-1.5, 1.5] m/s
+  #   vz             : [-2.0, 2.0] m/s
+  #   p (roll rate)  : [-5, 5]   rad/s
+  #   q (pitch rate) : [-5, 5]   rad/s
+  #   r (yaw rate)   : [-3, 3]   rad/s
+  x_min: [0.05, -0.6, -0.6, -1.5, -1.5, -2.0, -5.0, -5.0, -2.0]
+  x_max: [0.55,  0.6,  0.6,  1.5,  1.5,  2.0,  5.0,  5.0,  2.0]
+
+  # Control bounds: legs apply unilateral contact forces (>= 0).
+  #   Mass m = 12 kg -> weight m*g = 117.7 N -> ~29.4 N/foot to hover.
+  #   u_max = 100 N gives ~3.4x hover headroom per foot.
+  u_min: [0.0, 0.0, 0.0, 0.0]
+  u_max: [60.0, 60.0, 60.0, 60.0]
+
+  params:
+    mass: 12.0         # trunk mass (kg) -- Unitree A1 scale
+    Ix: 0.10           # roll inertia  (kg*m^2)  (body box ~0.3 x 0.1)
+    Iy: 0.20           # pitch inertia (kg*m^2)  (body box ~0.4 x 0.1)
+    Iz: 0.25           # yaw inertia   (kg*m^2)  (body box ~0.4 x 0.3)
+    a: 0.20            # half front-back hip distance (m)
+    b: 0.15            # half left-right hip distance (m)
+    gravity: 9.81
+
+constraint:
+  type: state_limits_sdf
+  params:
+    # "Don't fall" set: leave a small margin inside the state box so the
+    # value function captures the braking-distance structure in (theta, q).
+    limits:
+      0: [0.18, 0.42]     # trunk height pz
+      1: [-0.4, 0.4]      # roll  phi
+      2: [-0.4, 0.4]      # pitch theta
+    alpha: 20.0
+
+# Recommended 2D slice for visualisation: axes 2 (theta) and 7 (q),
+#   evaluate.py --slice-axes 2 7 --slice-fixed 0.3 0 0 0 0 0 0
+# (height at nominal stance 0.3 m, level roll, zero linear/yaw velocity).
+
+data:
+  enabled: false
+  sampling: random
+  num_samples: 600000
+  method: stochastic_beam_search
+  method_params:
+    strategy: "gumbel_topk"
+    temperature: 0.05
+  # method: mppi
+  B: 1000
+  K: 100
+  dt: 0.02
+  # method_params:
+  #   sigma: [21.0, 21.0, 21.0, 21.0]
+  #   lam: 0.0
+  #   n_iter: 5
+
+pde:
+  sampling: random
+  num_samples: 600000
+
+model:
+  layers:
+    - [9, null]
+    - [84, "sin"]
+    - [84, "sin"]
+    - [84, "sin"]
+    - [84, "sin"]
+    - [84, "sin"]
+    - [1, ["softplus", {beta: 10.0}]]
+  rescale_inputs: true
+
+training:
+  epochs: 10000
+  lr: 0.001
+  lr_milestones: [8000]
+  lr_gamma: 0.1
+  pde_weight_mode: fixed
+  pde_weight: 0.0
+
+validation:
+  enabled: true
+  T: 3.0
+  dt: 0.002
+  sampling: stratified
+  num_per_stratum: 500000
+
+output:
+  checkpoint_every: 1000
+  log_every: 20

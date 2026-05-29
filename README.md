@@ -1,0 +1,524 @@
+# VertexCBF
+
+A PyTorch framework for learning Control Barrier Functions (CBFs) for control-affine dynamical systems.
+
+The Neural CBF is parameterised as
+
+```
+V_Θ(x) = c(x) − r_Θ(x)
+```
+
+where `c(x)` is a constraint function defining the safe set `{x : c(x) ≥ 0}` and `r_Θ(x)` is a non-negative neural residual. Training combines a **PDE loss** (the stationary HJB variational inequality) with an optional **data loss** that regresses against precomputed reachability targets from a sampling-based MPC.
+
+> **For reviewers.** This repository is the complete, self-contained implementation
+> accompanying the paper. It ships only source code, YAML configs, and analysis
+> notebooks — no trained weights, datasets, or figures, all of which are
+> regenerable from scratch with the commands below. Every result in the paper is
+> produced by `scripts/train.py` + `scripts/evaluate.py` on the configs in
+> [`configs/`](configs/). See [Reproducing the Paper](#reproducing-the-paper).
+
+---
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Reproducing the Paper](#reproducing-the-paper)
+- [Configuration](#configuration)
+- [Scripts](#scripts)
+- [Validation](#validation)
+- [Available Systems](#available-systems)
+- [Constraint Functions](#constraint-functions)
+- [Adding a New System](#adding-a-new-system)
+- [Using the Library Directly](#using-the-library-directly)
+
+---
+
+## Installation
+
+**Requirements:** Python 3.9+, PyTorch 2.0+ (CUDA recommended for training).
+
+```bash
+git clone <repo-url>
+cd vertexcbf
+pip install -e .          # core library + scripts
+pip install -e ".[dev]"   # also installs Jupyter for the notebooks
+```
+
+For a pinned, reproducible environment, `requirements.txt` lists exact
+versions (CUDA 12.4 build of PyTorch), and a `Dockerfile` + `.devcontainer/`
+are provided — opening the repo in a devcontainer installs the package
+automatically.
+
+---
+
+## Project Structure
+
+```
+vertexcbf/
+├── vertexcbf/                  # Core library
+│   ├── dynamics/               # ControlAffine + concrete systems
+│   ├── mpc/                    # Sampling-based MPC methods
+│   ├── models.py               # MLP with input preprocessing
+│   ├── constraint/             # Constraint / SDF functions (one file per constraint)
+│   │   ├── interval.py
+│   │   ├── circle.py
+│   │   ├── rectangle.py
+│   │   ├── cylinder.py
+│   │   ├── ball_3d.py
+│   │   ├── two_disk.py
+│   │   ├── state_limits.py
+│   │   ├── landing_funnel.py
+│   │   ├── ee_sphere.py
+│   │   ├── manipulator_sphere.py
+│   │   └── composed.py
+│   ├── losses.py               # pde_loss and data_loss
+│   ├── trainer.py              # Trainer class
+│   ├── validation.py           # Closed-loop CBF validation
+│   └── config_utils.py         # Build components from config dicts
+├── configs/                    # YAML experiment configs (+ template.yaml)
+├── scripts/                    # train.py, evaluate.py, precompute_data.py, train_all.sh
+├── notebooks/                  # Exploratory analysis / figure-generation notebooks
+└── pyproject.toml
+```
+
+Running the scripts creates the following directories (all git-ignored and
+fully regenerable — nothing here is shipped with the repo):
+
+```
+checkpoints/<GROUP>/<system>/   # model + optimizer + loss history, validation results
+data/precomputed/<GROUP>/       # cached MPC supervision targets
+figures/<GROUP>/                # evaluation plots
+logs/                           # training logs from train_all.sh
+```
+
+`data/true_values/<system>/` is an *optional* input: ground-truth value
+functions (`grid.npy`, `values.npy`) from a separate reachability solver. When
+present, `evaluate.py` overlays them and reports MSE / sign agreement; when
+absent, that comparison is simply skipped. None are shipped here.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Copy the template and edit it for your system
+cp configs/template.yaml configs/my_system.yaml
+
+# 2. Train (MPC supervision is precomputed and cached on first run)
+python scripts/train.py --config configs/my_system.yaml
+
+# 3. Evaluate
+python scripts/evaluate.py \
+    --config configs/my_system.yaml \
+    --checkpoint checkpoints/VRC_DATA/my_system/final.pt
+```
+
+Artifacts are auto-routed into one of three per-method sub-folders so the
+three paper conditions stay separated on disk:
+
+| Acronym   | Condition                                                | MPC methods                                                      |
+|-----------|----------------------------------------------------------|------------------------------------------------------------------|
+| `NO_DATA` | PDE/HJB residual loss only (no supervision)              | — (set `data.enabled: false` or pass `--no-data`)                |
+| `FC_DATA` | "Full-control" data — continuous-control sampling MPC    | `mppi`, `cem`, `icem`, `random_shooting`                         |
+| `VRC_DATA` | "Vertex-restricted control" data — discrete / control-vertex search | `beam_search`, `stochastic_beam_search`, `branch_and_bound`, `cem_discrete` |
+
+The group is derived automatically from `data.enabled` and `data.method`, and
+becomes the first sub-folder of all generated artifacts:
+
+```
+checkpoints/<GROUP>/<system>/{final.pt, validation.{pt,json}, timing.json, ...}
+data/precomputed/<GROUP>/<system>.pt
+figures/<GROUP>/2d_slice_<system>.pdf
+```
+
+Ground truth (`data/true_values/<system>/`) is method-independent and is **not** grouped.
+
+---
+
+## Reproducing the Paper
+
+Each system in the paper corresponds to one config in [`configs/`](configs/).
+A single run trains the CBF, then (when `validation.enabled: true`) rolls out
+the closed-loop policy and writes the safety metrics:
+
+```bash
+# One system end-to-end (MPC supervision is computed and cached on first run)
+python scripts/train.py --config configs/inverted_pendulum.yaml
+python scripts/evaluate.py \
+    --config configs/inverted_pendulum.yaml \
+    --checkpoint checkpoints/VRC_DATA/inverted_pendulum/final.pt
+```
+
+To reproduce every system sequentially, use the helper script (it tees a
+timestamped log under `logs/` and survives SSH disconnects):
+
+```bash
+./scripts/train_all.sh                 # train all systems on the default device
+./scripts/train_all.sh --validate-only # re-run validation on existing checkpoints
+./scripts/train_all.sh --device cpu    # or --docker to run in the container
+```
+
+The per-run `validation.json` files hold the safety metrics reported in the
+paper; the notebooks in [`notebooks/`](notebooks/) aggregate them into the
+state-space figures and comparison plots. Expect GPU runtime to dominate — the
+default configs train for 10k epochs each.
+
+---
+
+## Configuration
+
+A single YAML file defines an experiment. See [`configs/template.yaml`](configs/template.yaml) for a fully-commented reference. The sections are:
+
+### `system`
+
+```yaml
+system:
+  name: InvertedPendulum     # class name (see Available Systems)
+  x_min: [-0.5, -1.5]        # state lower bounds, length == nx
+  x_max: [ 0.5,  1.5]        # state upper bounds
+  u_min: [-3.5]              # control lower bounds, length == nu
+  u_max: [ 3.5]              # control upper bounds
+  params: {m: 2.0, l: 1.0, gravity: 9.81}   # forwarded to constructor
+```
+
+### `constraint`
+
+```yaml
+constraint:
+  type: interval_sdf         # interval_sdf | circle_sdf | rectangle_sdf
+  params: {center: 0.0, d: 1.0}
+```
+
+See [Constraint Functions](#constraint-functions) for parameter lists.
+
+### `data`
+
+Supervision targets from a sampling-based MPC, cached after the first run.
+
+```yaml
+data:
+  enabled: true              # false = PDE loss only
+  sampling: grid             # grid | random
+  grid_shape: [30, 30]       # used when sampling == grid
+  # num_samples: 2000        # used when sampling == random
+  method: beam_search        # see table below
+  B: 60                      # budget (beam width / # trajectories)
+  K: 20                      # horizon (steps)
+  dt: 0.2                    # Euler step
+  method_params: {}          # method-specific kwargs
+```
+
+| `method`                  | Notes                                  | `method_params`                            |
+|---------------------------|----------------------------------------|--------------------------------------------|
+| `beam_search`             | Deterministic beam search              | —                                          |
+| `stochastic_beam_search`  | Stochastic variant                     | `strategy`, `temperature`, `epsilon`       |
+| `random_shooting`         | Single-pass random sampling            | —                                          |
+| `mppi`                    | Model Predictive Path Integral         | `sigma`, `lam`, `n_iter`                   |
+| `cem` / `cem_discrete`    | Cross-Entropy Method                   | `n_iter`, `elite_frac`                     |
+| `icem`                    | iCEM with colored noise                | `n_iter`, `elite_frac`, `noise_beta`       |
+| `branch_and_bound`        | Branch-and-Bound over control vertices | `n_restarts`, `tie_noise`                  |
+
+### `pde`
+
+States on which the HJB-VI residual is enforced (autograd-enabled).
+
+```yaml
+pde:
+  sampling: grid             # grid | random
+  grid_shape: [100, 100]
+  # num_samples: 10000
+```
+
+### `model`
+
+Each `layers` entry is `[output_size, activation]`. The first must be `[nx, null]`. Periodic state dimensions are auto-encoded as `[cos, sin]` pairs by the MLP.
+
+```yaml
+model:
+  layers:
+    - [2, null]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [1, ["softplus", {beta: 1.0}]]    # softplus output ⇒ r_Θ ≥ 0
+  rescale_inputs: true
+```
+
+Activations: `linear`, `relu`, `elu`, `selu`, `softplus`, `sigmoid`, `tanh`, `sin`.
+
+### `training`
+
+```yaml
+training:
+  epochs: 10000
+  lr: 0.001
+  lr_milestones: [7000]      # multiplied by lr_gamma at each
+  lr_gamma: 0.1
+  pde_weight_mode: fixed     # fixed | normalized | scheduled
+  pde_weight: 0.5            # used by fixed / scheduled
+  pde_weight_milestones: []  # e.g. [[5000, 0.9], [8000, 1.0]]
+```
+
+Loss is `w · pde_loss + (1 − w) · data_loss`. The mode controls `w`:
+- **fixed** — constant `w = pde_weight`.
+- **normalized** — each loss divided by its epoch-0 value (no weight tuning needed).
+- **scheduled** — `w` steps at the listed milestones.
+
+### `validation`
+
+Optional closed-loop CBF validation, run automatically at the end of `train.py`. See the [Validation](#validation) section for what the metric measures.
+
+```yaml
+validation:
+  enabled: true              # false (default) = skip validation
+  T: 5.0                     # rollout horizon (s)
+  dt: 0.05                   # Euler step (s)
+  sampling: stratified       # stratified (recommended) | random | grid
+  num_per_stratum: 5000      # used when sampling == stratified — target count
+                             #   per predicted-class stratum ({V>0} and {V≤0})
+  # max_oversample: 100      # rejection-sampling budget multiplier
+  # grid_shape: [50, 50]     # used when sampling == grid
+  # num_samples: 5000        # used when sampling == random
+  # batch_size: 1024         # optional; auto-selected from free GPU memory
+  # output_path: results/my_system_validation.pt   # default: <checkpoint_dir>/validation.pt
+  save_trajectories: false   # also store full (state_traj, control_traj) — can be large
+```
+
+When `enabled: true`, after training finishes the script samples initial states (per `sampling`), rolls out the Hamiltonian-greedy policy for `n_steps = round(T / dt)` steps, prints the two per-stratum precisions (and their complements, the false-safe and false-unsafe rates), and saves two artifacts side-by-side:
+
+| File                           | Format    | Contents                                                                                                                                                          | Use                                              |
+|--------------------------------|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------|
+| `<output_path>` (e.g. `validation.pt`) | `torch.save` dict | `states (N, nx)`, `initial_cbf (N,)` (predicted `V(x_0)`), `values (N,)` (running min `min_k c(x_k)`), stratified metrics, metadata, optional `state_traj`/`control_traj` | Figures (state-space heatmaps, trajectory plots) |
+| `<output_path>.json` sidecar       | JSON              | stratified metrics + metadata only (`system`, `T`, `dt`, `n_steps`, `n_states`, sampling, per-stratum counts)                                                          | Tables / aggregating across runs                 |
+
+Default location is `<checkpoint_dir>/validation.pt` (and `validation.json`). To load:
+
+```python
+import torch, json
+data = torch.load("checkpoints/VRC_DATA/double_integrator_1d/validation.pt", weights_only=False)
+summary = json.load(open("checkpoints/VRC_DATA/double_integrator_1d/validation.json"))
+sm = summary["stratified_metrics"]
+sm["predicted_safe"]["precision"]      # P(truly safe | V(x_0) > 0), in %
+sm["predicted_safe"]["false_safe_rate"]
+sm["predicted_unsafe"]["precision"]    # P(truly unsafe | V(x_0) ≤ 0), in %
+sm["predicted_unsafe"]["false_unsafe_rate"]
+```
+
+### `output`
+
+```yaml
+output:
+  checkpoint_dir: checkpoints/my_system   # default: checkpoints/<METHOD_GROUP>/<system_name>
+                                          # METHOD_GROUP is one of NO_DATA, FC_DATA, VRC_DATA
+                                          # derived from data.enabled and data.method.
+  checkpoint_every: 1000
+  log_every: 20
+```
+
+Checkpoints (`epoch_N.pt`, `final.pt`) include model, optimizer, scheduler, and loss history — training can be resumed at any epoch.
+
+---
+
+## Scripts
+
+```
+python scripts/train.py --config <path> [--resume <ckpt>] [--no-data] [--device <str>]
+
+python scripts/evaluate.py --config <path> --checkpoint <ckpt>
+                           [--output <path>] [--grid N N] [--device <str>]
+                           [--slice-axes I J] [--slice-fixed VAL ...]
+
+python scripts/precompute_data.py --config <path> [--output <path>] [--device <str>]
+```
+
+**`train.py`** runs the full pipeline. The first run executes the configured MPC method on the `data` grid/samples and caches the result to `data/precomputed/<GROUP>/<system_name>.pt` (`GROUP` ∈ {`NO_DATA`, `FC_DATA`, `VRC_DATA`}, see [Quick Start](#quick-start) for the routing rules); subsequent runs load instantly.
+
+**`evaluate.py`** loads a checkpoint, evaluates `V_Θ(x)` on a 2-D slice, and overlays the ground truth from `data/true_values/<system_name>/` if present (printing MSE and sign-agreement). For systems with `nx > 2`, choose which two dimensions to vary with `--slice-axes I J`; remaining dimensions are pinned with `--slice-fixed` (defaults to midpoints).
+
+**`precompute_data.py`** is the standalone version of the MPC step — useful when you want to precompute on a different machine or iterate on model architecture without rerunning MPC.
+
+---
+
+## Validation
+
+`vertexcbf.validate_cbf` rolls out the closed-loop dynamics under the Hamiltonian-greedy policy
+`u*(x) = argmax_u ∇V(x) · (f(x) + g(x) u)` (a vertex of the control box) and reports two **per-predicted-class** precisions comparing the predicted `V(x_0) > 0` to the true `min_k c(x_k) > 0` along the trajectory:
+
+- `predicted_safe.precision` &mdash; `P(truly safe | V(x_0) > 0)`; its complement is the **false-safe rate** (the safety-critical quantity: how often a "safe" certificate is wrong).
+- `predicted_unsafe.precision` &mdash; `P(truly unsafe | V(x_0) ≤ 0)`; its complement is the **false-unsafe rate** (how conservative the certificate is).
+
+These conditional rates are invariant to base-rate imbalance, unlike a joint confusion matrix where small false-safe percentages can be entirely explained by truly-unsafe states being rare in the sampling distribution.
+
+For tight estimates of both rates regardless of the prior, use `stratified_sample_by_predicted_cbf` to rejection-sample equal-sized populations from `{V > 0}` and `{V ≤ 0}` first:
+
+```python
+from vertexcbf import validate_cbf, stratified_sample_by_predicted_cbf
+
+samples = stratified_sample_by_predicted_cbf(
+    dynamics=dynamics, constr_fn=constr_fn, residual_fn=model,
+    num_per_stratum=5000,
+)
+result = validate_cbf(
+    dynamics=dynamics, states=samples["states"],
+    constr_fn=constr_fn, residual_fn=model,
+    T=5.0, dt=0.05,
+)
+sm = result["stratified_metrics"]
+print(sm["predicted_safe"]["precision"], sm["predicted_safe"]["false_safe_rate"])
+print(sm["predicted_unsafe"]["precision"], sm["predicted_unsafe"]["false_unsafe_rate"])
+```
+
+Optional flags return per-trajectory `values`, `initial_cbf`, `state_traj`, and `control_traj`. On CUDA the batch size is auto-selected from free memory.
+
+`train.py` runs this automatically when the config has a `validation` section with `enabled: true` (see [`validation`](#validation)).
+
+---
+
+## Available Systems
+
+| Class                 | `nx` | `nu` | State                              | Control      | Extra params                        |
+|-----------------------|:---:|:----:|------------------------------------|--------------|-------------------------------------|
+| `DoubleIntegrator1D`  | 2   | 1    | `[p, v]`                           | `[a]`        | —                                   |
+| `DoubleIntegrator2D`  | 4   | 2    | `[px, py, vx, vy]`                 | `[ax, ay]`   | —                                   |
+| `InvertedPendulum`    | 2   | 1    | `[θ, ω]`                           | `[τ]`        | `m`, `l`, `gravity`                 |
+| `VerticalDrone2D`     | 2   | 1    | `[z, vz]`                          | `[az]`       | `K`, `g`                            |
+| `DubinsCar`           | 3   | 1    | `[px, py, θ]`                      | `[ω]`        | `v`                                 |
+| `DynamicUnicycle`     | 5   | 2    | `[px, py, θ, v, ω]`                | `[a, α]`     | —                                   |
+| `KinematicBicycle`    | 4   | 2    | `[px, py, ψ, v]`                   | `[δ, a]`     | `L`                                 |
+| `CartPole`            | 4   | 1    | `[x, θ, v, ω]`                     | `[f]`        | `m_c`, `m_p`, `l`, `gravity`        |
+| `DoubleIntegrator3D`  | 6   | 3    | `[px, py, pz, vx, vy, vz]`         | `[ax, ay, az]` | —                                 |
+| `Manipulator3DOF`     | 6   | 3    | `[q₁, q₂, q₃, q̇₁, q̇₂, q̇₃]`        | `[τ₁, τ₂, τ₃]` | `l1`, `l2`, link masses           |
+| `RelativeUnicycle`    | 5   | 2    | `[px, py, ψ, vr, vp]`              | `[a, ω]`     | robot/target params                 |
+| `LandingRocket`       | 7   | 2    | `[px, pz, vx, vz, θ, ω, m]`        | `[T, τ]`     | `gravity`, `inertia`, `alpha`       |
+| `QuadrupedTrunk`      | 9   | 4    | `[pz, φ, θ, vx, vy, vz, p, q, r]`  | contact forces | mass / inertia params             |
+| `AUV6DoF`             | 12  | 6    | 6-DOF pose + body-frame velocities | `[F, τ]`     | hydrodynamic params                 |
+| `Quadrotor`           | 13  | 4    | pos + quat + lin/ang vel           | `[F, αx, αy, αz]` | `m`, `CT`, `Gz`                |
+
+Each dynamics file documents its exact state/control layout in the class
+docstring; see `vertexcbf/dynamics/`.
+
+Periodic states (angles) are auto-encoded by the MLP. To use a system from a YAML config, register it in `DYNAMICS_REGISTRY` (see [Adding a New System](#adding-a-new-system)).
+
+---
+
+## Constraint Functions
+
+`c(x)` defines the safe set `{x : c(x) ≥ 0}`. Available in `vertexcbf.constraint`:
+
+| Name                    | File                        | Geometry                                     | Key params                            |
+|-------------------------|-----------------------------|----------------------------------------------|---------------------------------------|
+| `interval_sdf`          | `constraint/interval.py`    | 1D interval on first state dim               | `center`, `d` (half-width)            |
+| `circle_sdf`            | `constraint/circle.py`      | Circle in `(x₀, x₁)` (obstacle convention)   | `center`, `radius`                    |
+| `rectangle_sdf`         | `constraint/rectangle.py`   | Axis-aligned box in `(x₀, x₁)`               | `center`, `a`, `b` (half-widths)      |
+| `cylinder_sdf`          | `constraint/cylinder.py`    | Infinite cylinder in `(x₀, x₁, x₂)`          | `center`, `direction`, `radius`       |
+| `ball_3d_sdf`           | `constraint/ball_3d.py`     | 3D ball in `(x₀, x₁, x₂)`                   | `center`, `radius`                    |
+| `two_disk_sdf`          | `constraint/two_disk.py`    | Two-disk collision in robot body frame        | `robot_radius`, `obstacle_radius`     |
+| `state_limits_sdf`      | `constraint/state_limits.py`| Soft min over per-dim box constraints        | `limits`, `alpha`                     |
+| `landing_funnel_sdf`    | `constraint/landing_funnel.py` | Landing funnel for rockets               | `px_pad`, `slope`, `vel_weight`, ...  |
+| `ee_sphere_sdf`         | `constraint/ee_sphere.py`   | 3-DOF manipulator end-effector vs sphere      | `l1`, `l2`, `center`, `radius`        |
+| `manipulator_sphere_sdf`| `constraint/manipulator_sphere.py` | Whole-arm 3-DOF manipulator vs sphere | `l1`, `l2`, `center`, `radius`, ...   |
+| `composed_sdf`          | `constraint/composed.py`    | Softmin composition of multiple SDFs         | `sdfs`, `alpha`                       |
+
+All functions are wired into `CONSTR_REGISTRY` in `config_utils.py` for YAML configs. They are also available for direct programmatic use via `from vertexcbf.constraint import <name>`.
+
+---
+
+## Adding a New System
+
+1. **Implement** `vertexcbf/dynamics/my_system.py`:
+
+   ```python
+   from vertexcbf.dynamics.control_affine import ControlAffine
+
+   class MySystem(ControlAffine):
+       name = "my_system"
+       nx, nu = 2, 1
+       periodic_states = []  # indices of angular state dims (wrapped to [x_min, x_max])
+       clamp_states = []     # indices of state dims to clamp to [x_min, x_max] each euler step
+
+       def f(self, x): ...   # (N, nx, 1)
+       def g(self, x): ...   # (N, nx, nu)
+   ```
+
+2. **Export** it from `vertexcbf/dynamics/__init__.py`.
+3. **Register** it in `DYNAMICS_REGISTRY` in `vertexcbf/config_utils.py` to enable YAML configs.
+4. **Configure** by copying `configs/template.yaml` and editing.
+
+---
+
+## Adding a New Constraint
+
+1. **Implement** `vertexcbf/constraint/my_constraint.py`:
+
+   ```python
+   from torch import Tensor
+
+   def my_constraint_sdf(states: Tensor, param1: float, ...) -> Tensor:
+       """
+       Args:
+           states: (..., nx) tensor of states
+           param1: ...
+       Returns:
+           (..., 1) tensor of SDF values (positive inside safe set, negative outside)
+       """
+       ...
+   ```
+
+2. **Export** it from `vertexcbf/constraint/__init__.py`:
+
+   ```python
+   from .my_constraint import my_constraint_sdf
+   # also add "my_constraint_sdf" to __all__
+   ```
+
+3. **Register** it in `CONSTR_REGISTRY` in `vertexcbf/config_utils.py` to enable YAML configs.
+
+---
+
+## Using the Library Directly
+
+```python
+import torch
+from functools import partial
+from vertexcbf import (
+    DoubleIntegrator1D, interval_sdf, MLP, Trainer, beam_search, validate_cbf,
+    stratified_sample_by_predicted_cbf,
+)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+dynamics = DoubleIntegrator1D(
+    x_min=[-1.5, -1.5], x_max=[1.5, 1.5],
+    u_min=[-0.5],       u_max=[0.5],
+    device=device,
+)
+constr_fn = partial(interval_sdf, center=0.0, d=1.0)
+
+model = MLP(
+    layers_config=[(2, None), (32, "sin"), (32, "sin"), (1, ("softplus", {"beta": 1.0}))],
+    input_min=dynamics.x_min, input_max=dynamics.x_max,
+    periodic_inputs=dynamics.periodic_states,
+).to(device)
+
+# MPC supervision targets
+states_d = dynamics.get_uniform_state_grid([30, 30]).reshape(-1, 2)
+values_d = beam_search(dynamics=dynamics, x0=states_d, B=60, K=20, dt=0.2,
+                       constr_fn=constr_fn)["values"]
+
+# Train
+Trainer(
+    dynamics=dynamics, model=model, constr_fn=constr_fn,
+    epochs=10000, lr=1e-3, lr_milestones=[7000],
+    pde_grid_shape=(100, 100), pde_weight_mode="normalized",
+    data_states=states_d, data_values=values_d,
+    checkpoint_dir="checkpoints/my_run",
+).train()
+
+# Closed-loop validation (stratified by predicted class)
+samples = stratified_sample_by_predicted_cbf(
+    dynamics, constr_fn, model, num_per_stratum=2000,
+)
+result = validate_cbf(dynamics, samples["states"], constr_fn, model, T=5.0, dt=0.05)
+print(result["stratified_metrics"])
+```

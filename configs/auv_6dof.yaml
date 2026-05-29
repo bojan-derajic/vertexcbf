@@ -1,0 +1,109 @@
+# 6-DoF underwater vehicle (Fossen rigid-body model, neutrally buoyant).
+#
+# Convention: world frame ENU (z-up); body frame x-forward, y-left, z-up.
+# State (12): [px, py, pz, phi, theta, psi, u, v, w, p, q, r]
+# Input  (6): [Fx, Fy, Fz, taux, tauy, tauz]  (body-frame force/moment)
+#
+# Safety constraint: pass through a 2x2 m tunnel aligned with the x-axis,
+# i.e. py in [-1, 1] m AND pz in [-1, 1] m.  Implemented via state_limits_sdf
+# on state indices 1 (py) and 2 (pz).
+
+system:
+  name: AUV6DoF
+  # State bounds:
+  #   px, py, pz    : [-3, 3]    m (state box wider than the tunnel so the
+  #                                 value function captures braking margin)
+  #   phi (roll)    : [-pi, pi]  rad   (periodic)
+  #   theta (pitch) : [-1.0, 1.0] rad  (stay well inside (-pi/2, pi/2) singularity)
+  #   psi (yaw)     : [-pi, pi]  rad   (periodic)
+  #   u (surge)     : [-2, 2]    m/s
+  #   v (sway)      : [-2, 2]    m/s
+  #   w (heave)     : [-2, 2]    m/s
+  #   p, q, r       : [-1.5, 1.5] rad/s
+  x_min: [-3.0, -3.0, -3.0, -3.14159, -1.0, -3.14159, -2.0, -2.0, -2.0, -1.5, -1.5, -1.5]
+  x_max: [ 3.0,  3.0,  3.0,  3.14159,  1.0,  3.14159,  2.0,  2.0,  2.0,  1.5,  1.5,  1.5]
+
+  # Control bounds (mass = 30 kg).  Side/vertical thrust deliberately limited
+  # so braking authority is the binding factor and the safe set sits strictly
+  # inside the tunnel.
+  #   Surge thrust:   +/- 80  N
+  #   Sway / heave:   +/- 20  N
+  #   Moments:        +/- 20  N*m about each body axis
+  u_min: [-80.0, -10.0, -10.0, -20.0, -20.0, -20.0]
+  u_max: [ 80.0,  10.0,  10.0,  20.0,  20.0,  20.0]
+
+  params:
+    m_t: 30.0          # translational mass (kg), with added mass absorbed
+    Ix: 0.5            # roll inertia  (kg*m^2)
+    Iy: 2.0            # pitch inertia (kg*m^2)  (elongated about body x)
+    Iz: 2.0            # yaw inertia   (kg*m^2)
+    # Hydrodynamic damping, per body-axis [u, v, w, p, q, r].
+    # Lower than a typical ROV so the AUV is not self-braking; the safe set
+    # must come from active control, not drag.
+    #   F_drag_i = -(d_lin_i + d_quad_i * |v_i|) * v_i
+    d_lin:  [3.0, 3.0, 3.0, 0.3, 0.5, 0.5]
+    d_quad: [5.0, 5.0, 5.0, 0.3, 1.0, 1.0]
+    h_cb: 0.02         # CB-above-CG offset (m); generates restoring moment
+    gravity: 9.81
+
+constraint:
+  type: state_limits_sdf
+  params:
+    # 2 x 2 m tunnel cross-section: py and pz both confined to [-1, 1] m.
+    limits:
+      1: [-2.0, 2.0]
+      2: [-2.0, 2.0]
+    alpha: 20.0
+
+# Recommended 2D slice for visualisation: axes 1 (py) and 2 (pz),
+# AUV cruising level through the tunnel at u = 1 m/s:
+#   evaluate.py --slice-axes 1 2 --slice-fixed 0 0 0 0 1 0 0 0 0 0
+# (order of fixed values: px, phi, theta, psi, u, v, w, p, q, r)
+
+data:
+  enabled: true
+  sampling: random
+  num_samples: 800000
+  method: stochastic_beam_search
+  method_params:
+    temperature: 0.08
+  # method: mppi
+  B: 800
+  K: 40
+  dt: 0.1
+  # method_params:
+  #   sigma: [28.0, 3.5, 3.5, 7.0, 7.0, 7.0]
+  #   lam: 0.0
+  #   n_iter: 5
+
+pde:
+  sampling: random
+  num_samples: 800000
+
+model:
+  layers:
+    - [12, null]
+    - [128, "sin"]
+    - [128, "sin"]
+    - [128, "sin"]
+    - [1, ["softplus", {beta: 10.0}]]
+  rescale_inputs: true
+
+training:
+  epochs: 10000
+  lr: 0.001
+  lr_milestones: [8000]
+  lr_gamma: 0.1
+  pde_weight_mode: fixed
+  pde_weight: 0.0
+
+validation:
+  enabled: true
+  T: 4.0
+  dt: 0.005
+  sampling: stratified
+  num_per_stratum: 500000
+
+output:
+  checkpoint_every: 1000
+  log_every: 20

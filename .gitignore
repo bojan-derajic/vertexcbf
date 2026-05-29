@@ -1,0 +1,27 @@
+# Python
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Jupyter
+**/.ipynb_checkpoints/
+
+# Editors
+**/.vscode/
+**/.idea/
+**/.claude/
+
+# Generated artifacts (regenerable via scripts/)
+checkpoints/
+data/precomputed/
+figures/
+
+# Logs
+logs/
+**/logs/
+*.log
+
+# OS
+.DS_Store

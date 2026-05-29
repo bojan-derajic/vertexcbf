@@ -1,0 +1,72 @@
+system:
+  name: RelativeUnicycle
+  # state = [px, py, psi, vr, vp]
+  #   px, py : pedestrian position in robot body frame [m]
+  #   psi    : pedestrian heading relative to robot heading [rad] (periodic)
+  #   vr     : robot linear speed [m/s]
+  #   vp     : pedestrian speed [m/s] (constant, lifted into state)
+  x_min: [-4.0, -4.0, -3.14159265,  0.0, 0.0]
+  x_max: [ 4.0,  4.0,  3.14159265,  1.5, 1.5]
+  # u = [a, omega]
+  #   a     : robot linear acceleration [m/s^2]
+  #   omega : robot angular velocity    [rad/s]
+  u_min: [-1.0, -0.6]
+  u_max: [ 1.0,  0.6]
+  params: {}
+
+constraint:
+  # Two-disk collision in the robot body frame:
+  #   safe iff || (px, py) || >= robot_radius + obstacle_radius
+  type: two_disk_sdf
+  params:
+    robot_radius: 0.5
+    obstacle_radius: 0.5
+
+data:
+  enabled: true
+  sampling: random
+  num_samples: 1000000
+  method: beam_search
+  method_params: {}
+  # method: mppi
+  B: 1000
+  K: 50
+  dt: 0.1
+  # method_params:
+  #   sigma: [0.35, 0.21]
+  #   lam: 0.0
+  #   n_iter: 5
+
+pde:
+  sampling: random
+  num_samples: 2000000
+
+model:
+  layers:
+    - [5, null]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [32, "sin"]
+    - [1, ["softplus", {beta: 10.0}]]
+  rescale_inputs: true
+
+training:
+  epochs: 10000
+  lr: 0.001
+  lr_milestones: [8000]
+  lr_gamma: 0.1
+  pde_weight_mode: fixed
+  pde_weight: 0.3
+
+validation:
+  enabled: true
+  T: 5.0
+  dt: 0.005
+  sampling: stratified
+  num_per_stratum: 500000
+
+output:
+  checkpoint_every: 1000
+  log_every: 20

@@ -1,0 +1,88 @@
+system:
+  name: Manipulator3DOF
+  # State:  [q1, q2, q3, qd1, qd2, qd3]
+  #   q1 = shoulder yaw (periodic in [-pi, pi])
+  #   q2 = shoulder pitch (positive lifts the arm)
+  #   q3 = elbow pitch (relative to upper arm)
+  x_min: [-1, -1, -1, -3.0, -6.0, -6.0]
+  x_max: [ 1,  1,  1,  3.0,  6.0,  6.0]
+  # Asymmetric torques matched to per-joint gravity demand:
+  #   yaw (q1):           no gravity load           -> ~10 Nm is ample
+  #   shoulder pitch (q2): up to 19.6 Nm gravity    -> 30 Nm gives ~1.5x headroom
+  #   elbow (q3):          up to 4.9 Nm gravity     -> 10 Nm gives ~2x headroom
+  u_min: [-10.0, -20.0, -10.0]
+  u_max: [ 10.0,  20.0,  10.0]
+  params:
+    m1: 2.0
+    m2: 2.0
+    l1: 0.5
+    l2: 0.5
+    lc1: 0.25
+    lc2: 0.25
+    # I_i scaled as m * l^2 / 12 (slender-rod body inertia about COM):
+    # 2 * 0.5^2 / 12 = 0.04167
+    I1: 0.0417
+    I2: 0.0417
+    I3: 0.0417
+    gravity: 9.81
+
+# Spherical obstacle at (0.4, 0.0, 0.3) of radius 0.2.  The reachable workspace
+# is a ball of radius l1+l2 = 1.0 around the shoulder; this obstacle sits well
+# inside it so collision avoidance is non-trivial.
+constraint:
+  type: manipulator_sphere_sdf
+  params:
+    l1: 0.5
+    l2: 0.5
+    center: [0.6, 0.0, -0.2]
+    radius: 0.2
+    link_radius: 0.1      # capsule thickness applied to both links
+    alpha: 20.0            # softmin over the two link distances
+
+data:
+  enabled: false
+  sampling: random
+  num_samples: 600000
+  method: beam_search
+  method_params: {}
+  # method: mppi
+  B: 1000
+  K: 60
+  dt: 0.05
+  # method_params:
+  #   sigma: [3.5, 7.0, 3.5]
+  #   lam: 0.0
+  #   n_iter: 5
+
+pde:
+  sampling: random
+  num_samples: 600000
+
+model:
+  layers:
+    - [6, null]
+    - [64, "sin"]
+    - [64, "sin"]
+    - [64, "sin"]
+    - [64, "sin"]
+    - [1, ["softplus", {beta: 10.0}]]
+  rescale_inputs: true
+
+training:
+  epochs: 10000
+  lr: 0.001
+  lr_milestones: [8000]
+  lr_gamma: 0.1
+  pde_weight_mode: fixed
+  pde_weight: 0.0
+
+validation:
+  enabled: true
+  T: 4.0
+  dt: 0.005
+  sampling: stratified
+  num_per_stratum: 500000
+
+output:
+  checkpoint_every: 1000
+  log_every: 20
