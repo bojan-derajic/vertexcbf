@@ -45,12 +45,8 @@ from vertexcbf.models import MLP
 from vertexcbf.mpc import (
     beam_search,
     stochastic_beam_search,
-    random_shooting,
-    mppi,
-    cem,
-    cem_discrete,
-    icem,
     branch_and_bound,
+    mppi,
 )
 from vertexcbf.constraint import (
     ball_3d_sdf,
@@ -103,28 +99,21 @@ CONSTR_REGISTRY: dict[str, Callable] = {
 MPC_REGISTRY: dict[str, Callable] = {
     "beam_search": beam_search,
     "stochastic_beam_search": stochastic_beam_search,
-    "random_shooting": random_shooting,
-    "mppi": mppi,
-    "cem": cem,
-    "cem_discrete": cem_discrete,
-    "icem": icem,
     "branch_and_bound": branch_and_bound,
+    "mppi": mppi,
 }
 
 # Acronyms used in the paper to group results by data-generation method:
 #   NO_DATA — PDE/HJB residual loss only (no supervision targets).
-#   FC_DATA — "full-control" data: continuous-control sampling MPC
-#             (mppi, cem, icem, random_shooting).
-#   VRC_DATA — "vertex-restricted control" data: discrete / control-vertex
-#              search (beam_search, stochastic_beam_search, branch_and_bound,
-#              cem_discrete).
+#   FC_DATA — "full-control" data: sampling-based MPC over the full control
+#             set (mppi).
+#   VRC_DATA — "vertex-restricted control" data: tree search over the control
+#              vertices (beam_search, stochastic_beam_search, branch_and_bound).
 METHOD_GROUPS: tuple[str, ...] = ("NO_DATA", "FC_DATA", "VRC_DATA")
 
-_FC_METHODS: frozenset[str] = frozenset(
-    {"mppi", "cem", "icem", "random_shooting"}
-)
+_FC_METHODS: frozenset[str] = frozenset({"mppi"})
 _VRC_METHODS: frozenset[str] = frozenset(
-    {"beam_search", "stochastic_beam_search", "branch_and_bound", "cem_discrete"}
+    {"beam_search", "stochastic_beam_search", "branch_and_bound"}
 )
 
 
@@ -162,12 +151,12 @@ def build_mpc_runner(
     dynamics: "ControlAffine",
     constr_fn: Callable,
 ) -> Callable:
-    """Build a callable that runs the configured MPC method on a batch of states.
+    """Build a callable that runs the configured search method on a batch of states.
 
-    The ``data`` config section selects which sampling-based MPC method is used
-    to compute supervision targets.  ``B`` is the unified budget parameter
-    across all methods: beam width for beam-search methods, number of sampled
-    trajectories for the others (passed internally as ``N_s``).
+    The ``data`` config section selects which trajectory-optimization method is
+    used to compute supervision targets.  ``B`` is the unified budget parameter
+    across all methods: beam width for the vertex-restricted tree-search methods,
+    number of sampled trajectories for ``mppi`` (passed internally as ``N_s``).
     Method-specific hyperparameters live under the optional ``method_params``
     sub-dict.
 
@@ -175,12 +164,8 @@ def build_mpc_runner(
 
     * ``beam_search``            — *(no extra params)*
     * ``stochastic_beam_search`` — ``strategy``, ``temperature``, ``epsilon``
-    * ``random_shooting``        — *(no extra params)*
-    * ``mppi``                   — ``sigma``, ``lam``, ``n_iter``
-    * ``cem``                    — ``n_iter``, ``elite_frac``
-    * ``cem_discrete``           — ``n_iter``, ``elite_frac``
-    * ``icem``                   — ``n_iter``, ``elite_frac``, ``noise_beta``
     * ``branch_and_bound``       — ``n_restarts``, ``tie_noise``
+    * ``mppi``                   — ``sigma``, ``lam``, ``n_iter``
 
     Args:
         data_cfg: The ``data`` section of a config dict.  Must contain ``B``,

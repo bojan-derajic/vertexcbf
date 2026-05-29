@@ -1,18 +1,18 @@
-"""Precompute supervision data via sampling-based MPC and cache to disk.
+"""Precompute supervision data via vertex-restricted tree search and cache to disk.
 
-Running the MPC method is the most expensive step and rarely needs to be
-repeated.  This script runs it once and saves the result so that
+Generating the supervision labels is the most expensive step and rarely needs
+to be repeated.  This script runs it once and saves the result so that
 ``train.py`` can load it instantly.
 
-The MPC method is controlled by ``data.method`` in the config (default:
-``beam_search``).  See ``configs/template.yaml`` for all options.
+The label-generation method is controlled by ``data.method`` in the config
+(default: ``beam_search``).  See ``configs/template.yaml`` for all options.
 
 Output is auto-routed into a per-method-group sub-folder so the three paper
 conditions stay separated on disk: ``data/precomputed/<GROUP>/<system>.pt``,
-where ``GROUP`` is one of ``FC_DATA`` (mppi / cem / icem / random_shooting)
-or ``VRC_DATA`` ("vertex-restricted control": beam_search /
-stochastic_beam_search / branch_and_bound / cem_discrete).  ``NO_DATA`` configs are skipped because supervision data is
-not generated when ``data.enabled: false``.
+where ``GROUP`` is one of ``FC_DATA`` (full-control sampling MPC: ``mppi``)
+or ``VRC_DATA`` ("vertex-restricted control": ``beam_search`` /
+``stochastic_beam_search`` / ``branch_and_bound``).  ``NO_DATA`` configs are
+skipped because supervision data is not generated when ``data.enabled: false``.
 
 Usage
 -----

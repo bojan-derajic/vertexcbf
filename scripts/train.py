@@ -4,11 +4,11 @@ Artifacts are auto-routed into a per-method group sub-folder so the three
 paper conditions stay separated on disk:
     NO_DATA — PDE/HJB residual loss only (no supervision).  Triggered by
               ``data.enabled: false`` or the ``--no-data`` flag.
-    FC_DATA — "full-control" data: continuous-control sampling MPC
-              (``mppi``, ``cem``, ``icem``, ``random_shooting``).
-    VRC_DATA — "vertex-restricted control" data: discrete / control-vertex
-              search (``beam_search``, ``stochastic_beam_search``,
-              ``branch_and_bound``, ``cem_discrete``).
+    FC_DATA — "full-control" data: sampling-based MPC over the full control
+              set (``mppi``).
+    VRC_DATA — "vertex-restricted control" data: tree search over the control
+              vertices (``beam_search``, ``stochastic_beam_search``,
+              ``branch_and_bound``).
 Default paths become::
     checkpoints/<GROUP>/<system>/{final.pt, validation.{pt,json}, timing.json}
     data/precomputed/<GROUP>/<system>.pt

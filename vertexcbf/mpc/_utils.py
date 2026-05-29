@@ -126,8 +126,7 @@ def _peak_bytes_shooting(N_s: int, K: int, nx: int, nu: int, dtype_bytes: int) -
     buffer ``(N*N_s, nx)`` used inside :func:`score_sequences`, and a ×4
     overhead for PyTorch intermediate allocations.
 
-    Applies to: ``random_shooting``, ``cem``, ``icem``, ``mppi``,
-    ``cem_discrete``.
+    Applies to ``mppi`` (the sampling-based, full-control method).
     """
     elements = N_s * (K * nu + nx + 1)
     return 4 * elements * dtype_bytes
