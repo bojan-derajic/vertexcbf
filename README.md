@@ -8,14 +8,12 @@ The Neural CBF is parameterised as
 V_Θ(x) = c(x) − r_Θ(x)
 ```
 
-where `c(x)` is a constraint function defining the safe set `{x : c(x) ≥ 0}` and `r_Θ(x)` is a non-negative neural residual. Training combines a **PDE loss** (the stationary HJB variational inequality) with an optional **data loss** that regresses against precomputed reachability targets from a sampling-based MPC.
+where `c(x)` is a constraint function defining the safe set `{x : c(x) ≥ 0}` and `r_Θ(x)` is a non-negative neural residual. Training combines a **PDE loss** (the stationary HJB variational inequality) with a **data loss** that regresses against precomputed reachability targets from a tree-search restricted to the control vertices.
 
 > **For reviewers.** This repository is the complete, self-contained implementation
 > accompanying the paper. It ships only source code, YAML configs, and analysis
 > notebooks — no trained weights, datasets, or figures, all of which are
-> regenerable from scratch with the commands below. Every result in the paper is
-> produced by `scripts/train.py` + `scripts/evaluate.py` on the configs in
-> [`configs/`](configs/). See [Reproducing the Paper](#reproducing-the-paper).
+> regenerable from scratch with the commands below (see [Reproducing the Paper](#reproducing-the-paper)).
 
 ---
 
