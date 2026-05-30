@@ -48,7 +48,7 @@ from vertexcbf.trajopt import (
     branch_and_bound,
     mppi,
 )
-from vertexcbf.constraint import (
+from vertexcbf.constraints import (
     ball_3d_sdf,
     circle_sdf,
     cylinder_sdf,

@@ -61,7 +61,7 @@ vertexcbf/
 │   ├── dynamics/               # ControlAffine + concrete systems
 │   ├── trajopt/                # Supervision-label generation (see note below)
 │   ├── models.py               # MLP with input preprocessing
-│   ├── constraint/             # Constraint / SDF functions (one file per constraint)
+│   ├── constraints/            # Constraint / SDF functions (one file per constraint)
 │   │   ├── interval.py
 │   │   ├── circle.py
 │   │   ├── rectangle.py
@@ -410,23 +410,23 @@ Periodic states (angles) are auto-encoded by the MLP. To use a system from a YAM
 
 ## Constraint Functions
 
-`c(x)` defines the safe set `{x : c(x) ≥ 0}`. Available in `vertexcbf.constraint`:
+`c(x)` defines the safe set `{x : c(x) ≥ 0}`. Available in `vertexcbf.constraints`:
 
 | Name                    | File                        | Geometry                                     | Key params                            |
 |-------------------------|-----------------------------|----------------------------------------------|---------------------------------------|
-| `interval_sdf`          | `constraint/interval.py`    | 1D interval on first state dim               | `center`, `d` (half-width)            |
-| `circle_sdf`            | `constraint/circle.py`      | Circle in `(x₀, x₁)` (obstacle convention)   | `center`, `radius`                    |
-| `rectangle_sdf`         | `constraint/rectangle.py`   | Axis-aligned box in `(x₀, x₁)`               | `center`, `a`, `b` (half-widths)      |
-| `cylinder_sdf`          | `constraint/cylinder.py`    | Infinite cylinder in `(x₀, x₁, x₂)`          | `center`, `direction`, `radius`       |
-| `ball_3d_sdf`           | `constraint/ball_3d.py`     | 3D ball in `(x₀, x₁, x₂)`                   | `center`, `radius`                    |
-| `two_disk_sdf`          | `constraint/two_disk.py`    | Two-disk collision in robot body frame        | `robot_radius`, `obstacle_radius`     |
-| `state_limits_sdf`      | `constraint/state_limits.py`| Soft min over per-dim box constraints        | `limits`, `alpha`                     |
-| `landing_funnel_sdf`    | `constraint/landing_funnel.py` | Landing funnel for rockets               | `px_pad`, `slope`, `vel_weight`, ...  |
-| `ee_sphere_sdf`         | `constraint/ee_sphere.py`   | 3-DOF manipulator end-effector vs sphere      | `l1`, `l2`, `center`, `radius`        |
-| `manipulator_sphere_sdf`| `constraint/manipulator_sphere.py` | Whole-arm 3-DOF manipulator vs sphere | `l1`, `l2`, `center`, `radius`, ...   |
-| `composed_sdf`          | `constraint/composed.py`    | Softmin composition of multiple SDFs         | `sdfs`, `alpha`                       |
+| `interval_sdf`          | `constraints/interval.py`    | 1D interval on first state dim               | `center`, `d` (half-width)            |
+| `circle_sdf`            | `constraints/circle.py`      | Circle in `(x₀, x₁)` (obstacle convention)   | `center`, `radius`                    |
+| `rectangle_sdf`         | `constraints/rectangle.py`   | Axis-aligned box in `(x₀, x₁)`               | `center`, `a`, `b` (half-widths)      |
+| `cylinder_sdf`          | `constraints/cylinder.py`    | Infinite cylinder in `(x₀, x₁, x₂)`          | `center`, `direction`, `radius`       |
+| `ball_3d_sdf`           | `constraints/ball_3d.py`     | 3D ball in `(x₀, x₁, x₂)`                   | `center`, `radius`                    |
+| `two_disk_sdf`          | `constraints/two_disk.py`    | Two-disk collision in robot body frame        | `robot_radius`, `obstacle_radius`     |
+| `state_limits_sdf`      | `constraints/state_limits.py`| Soft min over per-dim box constraints        | `limits`, `alpha`                     |
+| `landing_funnel_sdf`    | `constraints/landing_funnel.py` | Landing funnel for rockets               | `px_pad`, `slope`, `vel_weight`, ...  |
+| `ee_sphere_sdf`         | `constraints/ee_sphere.py`   | 3-DOF manipulator end-effector vs sphere      | `l1`, `l2`, `center`, `radius`        |
+| `manipulator_sphere_sdf`| `constraints/manipulator_sphere.py` | Whole-arm 3-DOF manipulator vs sphere | `l1`, `l2`, `center`, `radius`, ...   |
+| `composed_sdf`          | `constraints/composed.py`    | Softmin composition of multiple SDFs         | `sdfs`, `alpha`                       |
 
-All functions are wired into `CONSTR_REGISTRY` in `config_utils.py` for YAML configs. They are also available for direct programmatic use via `from vertexcbf.constraint import <name>`.
+All functions are wired into `CONSTR_REGISTRY` in `config_utils.py` for YAML configs. They are also available for direct programmatic use via `from vertexcbf.constraints import <name>`.
 
 ---
 
@@ -455,7 +455,7 @@ All functions are wired into `CONSTR_REGISTRY` in `config_utils.py` for YAML con
 
 ## Adding a New Constraint
 
-1. **Implement** `vertexcbf/constraint/my_constraint.py`:
+1. **Implement** `vertexcbf/constraints/my_constraint.py`:
 
    ```python
    from torch import Tensor
@@ -471,7 +471,7 @@ All functions are wired into `CONSTR_REGISTRY` in `config_utils.py` for YAML con
        ...
    ```
 
-2. **Export** it from `vertexcbf/constraint/__init__.py`:
+2. **Export** it from `vertexcbf/constraints/__init__.py`:
 
    ```python
    from .my_constraint import my_constraint_sdf
