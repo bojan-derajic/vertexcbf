@@ -61,13 +61,15 @@ data:
   # Used when sampling: random — total number of random states
   # num_samples: 900
 
-  # MPC method used to compute supervision targets.
-  # Options: beam_search, stochastic_beam_search, random_shooting,
-  #          mppi, cem, cem_discrete, icem, branch_and_bound
+  # Method used to compute supervision targets. The vertex-restricted (VRCD)
+  # methods search a tree over the control vertices; the full-control (FCD)
+  # methods are sampling-based MPC over the full control set.
+  # Options: beam_search, stochastic_beam_search, branch_and_bound,
+  #          cem_discrete, mppi, cem, icem, random_shooting
   method: beam_search
 
   # Common hyperparameters
-  B: 60                 # budget: beam width (beam methods) / number of trajectories (shooting methods)
+  B: 60                 # budget: beam width (tree-search methods) / number of trajectories (shooting methods)
   K: 20                 # prediction horizon (steps)
   dt: 0.2               # Euler integration time step
 
@@ -81,7 +83,13 @@ data:
   #     temperature: 1.0
   #     epsilon: 0.1
 
-  # mppi:
+  # branch_and_bound:
+  #   method_params:
+  #     n_restarts: 3           # BnB passes; pass 1 primes the global lower bound,
+  #                             # subsequent passes exploit tighter pruning
+  #     tie_noise: 1.0e-6       # noise std for tie-breaking in passes 2+ (0=deterministic)
+
+  # mppi:                       # full-control (FCD) sampling-based MPC baseline
   #   method_params:
   #     sigma: 0.5              # Gaussian noise std (scalar or per-control-dim)
   #     lam: 1.0                # temperature — lower = more greedy
@@ -97,12 +105,6 @@ data:
   #     n_iter: 5
   #     elite_frac: 0.1
   #     noise_beta: 0.9         # AR(1) temporal correlation (0=i.i.d., near-1=smooth)
-
-  # branch_and_bound:
-  #   method_params:
-  #     n_restarts: 3           # BnB passes; pass 1 primes the global lower bound,
-  #                             # subsequent passes exploit tighter pruning
-  #     tie_noise: 1.0e-6       # noise std for tie-breaking in passes 2+ (0=deterministic)
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +232,9 @@ validation:
 # Default checkpoint_dir is checkpoints/<METHOD_GROUP>/<system_name>, where
 # METHOD_GROUP is derived automatically from the data section:
 #   NO_DATA — data.enabled: false (or --no-data on the CLI)
-#   FC_DATA — data.method ∈ {mppi, cem, icem, random_shooting}
+#   FC_DATA — data.method ∈ {mppi}
 #   VRC_DATA — data.method ∈ {beam_search, stochastic_beam_search,
-#                            branch_and_bound, cem_discrete}
+#                            branch_and_bound}
 # Precomputed supervision data is similarly routed to
 # data/precomputed/<METHOD_GROUP>/<system_name>.pt.
 output:

@@ -27,7 +27,7 @@ def branch_and_bound(
     return_trajs: bool = False,
     batch_size: int | None = None,
 ) -> dict:
-    """Batched Branch-and-Bound MPC maximising min_{k=0..K} constr_fn(x_k).
+    """Batched Branch-and-Bound search maximising min_{k=0..K} constr_fn(x_k).
 
     Performs a level-by-level BnB tree search over the vertices of the control
     box [u_min, u_max].  The upper bound (UB) for any partial trajectory
