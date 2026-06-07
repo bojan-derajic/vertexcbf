@@ -1,18 +1,18 @@
-"""Precompute supervision data via sampling-based MPC and cache to disk.
+"""Precompute supervision data via vertex-restricted tree search and cache to disk.
 
-Running the MPC method is the most expensive step and rarely needs to be
-repeated.  This script runs it once and saves the result so that
+Generating the supervision labels is the most expensive step and rarely needs
+to be repeated.  This script runs it once and saves the result so that
 ``train.py`` can load it instantly.
 
-The MPC method is controlled by ``data.method`` in the config (default:
-``beam_search``).  See ``configs/template.yaml`` for all options.
+The label-generation method is controlled by ``data.method`` in the config
+(default: ``beam_search``).  See ``configs/template.yaml`` for all options.
 
 Output is auto-routed into a per-method-group sub-folder so the three paper
 conditions stay separated on disk: ``data/precomputed/<GROUP>/<system>.pt``,
-where ``GROUP`` is one of ``FC_DATA`` (mppi / cem / icem / random_shooting)
-or ``VRC_DATA`` ("vertex-restricted control": beam_search /
-stochastic_beam_search / branch_and_bound / cem_discrete).  ``NO_DATA`` configs are skipped because supervision data is
-not generated when ``data.enabled: false``.
+where ``GROUP`` is one of ``FC_DATA`` (full-control sampling MPC: ``mppi``)
+or ``VRC_DATA`` ("vertex-restricted control": ``beam_search`` /
+``stochastic_beam_search`` / ``branch_and_bound``).  ``NO_DATA`` configs are
+skipped because supervision data is not generated when ``data.enabled: false``.
 
 Usage
 -----
@@ -34,7 +34,7 @@ import yaml
 from vertexcbf.config_utils import (
     build_constr_fn,
     build_dynamics,
-    build_mpc_runner,
+    build_trajopt_runner,
     method_group,
 )
 
@@ -106,8 +106,8 @@ def main() -> None:
             f"(grid {grid_shape}, B={data_cfg['B']}, K={data_cfg['K']}, dt={data_cfg['dt']})..."
         )
 
-    run_mpc = build_mpc_runner(data_cfg, dynamics, constr_fn)
-    values = run_mpc(states)
+    run_trajopt = build_trajopt_runner(data_cfg, dynamics, constr_fn)
+    values = run_trajopt(states)
 
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     torch.save(
