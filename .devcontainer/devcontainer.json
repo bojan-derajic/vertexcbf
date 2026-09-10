@@ -19,10 +19,10 @@
         "ms-python.vscode-pylance",
         "ms-toolsai.jupyter",
         "ms-toolsai.jupyter-keymap",
-        "ms-python.black-formatter",
+        "ms-python.black-formatter"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/opt/conda/bin/python",
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
         "jupyter.notebookFileRoot": "/workspace"
       }
     }
