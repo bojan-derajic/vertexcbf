@@ -38,6 +38,11 @@ Usage
 
     # Override device:
     python scripts/train.py --config configs/double_integrator_1d.yaml --device cpu
+
+    # Repeat training with different seeds on identical (reused) supervision
+    # data; each seed lands in <checkpoint_dir>/seed_<n>/:
+    python scripts/train.py --config configs/double_integrator_1d.yaml \\
+        --reuse-data --seed 0
 """
 
 from __future__ import annotations
@@ -45,8 +50,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import time
 
+import numpy as np
 import torch
 import yaml
 
@@ -314,6 +321,14 @@ def _jsonify_volume_metrics(vm: dict) -> dict:
     }
 
 
+def _set_seed(seed: int) -> None:
+    """Seed python/numpy/torch RNGs for reproducible weight init and training."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
 def _describe_device(device: torch.device) -> dict:
     """Return a JSON-serializable description of the device used."""
     info: dict = {"type": device.type, "str": str(device)}
@@ -360,6 +375,23 @@ def main() -> None:
         default=None,
         help="Device string, e.g. 'cuda' or 'cpu'.  Auto-detected if omitted.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=(
+            "Random seed for weight init and training. Overrides training.seed "
+            "from the config. Leave unset (and unset in config) for nondeterministic init."
+        ),
+    )
+    parser.add_argument(
+        "--no-early-stop",
+        action="store_true",
+        help=(
+            "Always train the full training.epochs, ignoring the trivial-"
+            "solution check (training.collapse_patience)."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -370,6 +402,11 @@ def main() -> None:
     print(f"Using device: {device}")
     print(f"Config: {args.config}")
 
+    seed = args.seed if args.seed is not None else cfg.get("training", {}).get("seed")
+    if seed is not None:
+        _set_seed(int(seed))
+        print(f"Seed: {seed}")
+
     # Build components
     dynamics = build_dynamics(cfg["system"], device=device)
     constr_fn = build_constr_fn(cfg["constraint"])
@@ -379,6 +416,8 @@ def main() -> None:
     out_cfg = cfg.get("output", {})
     group = method_group(cfg.get("data", {}), no_data_override=args.no_data)
     checkpoint_dir = out_cfg.get("checkpoint_dir") or f"checkpoints/{group}/{dynamics.name}"
+    if seed is not None:
+        checkpoint_dir = os.path.join(checkpoint_dir, f"seed_{seed}")
     print(f"Method group: {group}")
     print(f"Checkpoint dir: {checkpoint_dir}")
 
@@ -426,6 +465,13 @@ def main() -> None:
     else:
         pde_kwargs = {"pde_grid_shape": tuple(pde_cfg.get("grid_shape", [100, 100]))}
 
+    # Early stopping on collapse to a trivial certificate.  Off unless the
+    # config sets training.collapse_patience > 0 (see configs/template.yaml).
+    patience = 0 if args.no_early_stop else int(train_cfg.get("collapse_patience", 0) or 0)
+    check_every = int(train_cfg.get("collapse_check_every", 50))
+    max_value = float(train_cfg.get("collapse_max_value", 0.0))
+    const_tol = float(train_cfg.get("collapse_const_tol", 1e-4))
+
     trainer = Trainer(
         dynamics=dynamics,
         model=model,
@@ -444,9 +490,19 @@ def main() -> None:
         checkpoint_dir=checkpoint_dir,
         checkpoint_every=out_cfg.get("checkpoint_every", 1000),
         resume_from=args.resume,
+        collapse_patience=patience,
+        collapse_check_every=check_every,
+        collapse_max_value=max_value,
+        collapse_const_tol=const_tol,
     )
 
     print(f"\nStarting training for {train_cfg.get('epochs', 10000)} epochs...")
+    if patience:
+        print(
+            f"Early stop: only if V collapses to a trivial solution "
+            f"(max V < {max_value:.1e}, or spread < {const_tol:.1e}) "
+            f"and stays there for {patience} epochs."
+        )
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     t_train_start = time.time()
@@ -455,7 +511,10 @@ def main() -> None:
         torch.cuda.synchronize(device)
     t_train = time.time() - t_train_start
 
-    print("Training complete.")
+    if trainer.stopped_early:
+        print(f"Training complete (early stop after {trainer.epochs_run} epochs).")
+    else:
+        print("Training complete.")
 
     t_val = _run_validation(
         cfg, dynamics, constr_fn, model, default_dir=checkpoint_dir, device=device
@@ -473,6 +532,10 @@ def main() -> None:
     else:
         print(f"  Data generation time : {t_data:.3f}s")
     print(f"  Training time        : {t_train:.3f}s")
+    print(
+        f"  Training epochs      : {trainer.epochs_run}"
+        f"{' (early stop)' if trainer.stopped_early else ''}"
+    )
     if t_val is not None:
         print(f"  Validation time      : {t_val:.3f}s")
     print(f"  Total time           : {t_total:.3f}s")
@@ -482,11 +545,14 @@ def main() -> None:
         "device": _describe_device(device),
         "config": os.path.abspath(args.config),
         "system": dynamics.name,
+        "seed": seed,
         "data_generation_time_sec": None if t_data is None else float(t_data),
         "data_generation_skipped": data_generation_skipped,
         "data_loaded_from_cache": data_from_cache,
         "training_time_sec": float(t_train),
-        "training_epochs": int(train_cfg.get("epochs", 10000)),
+        "training_epochs": int(trainer.epochs_run),
+        "training_epochs_configured": int(train_cfg.get("epochs", 10000)),
+        "early_stopped": bool(trainer.stopped_early),
         "validation_time_sec": None if t_val is None else float(t_val),
         "total_time_sec": float(t_total),
     }

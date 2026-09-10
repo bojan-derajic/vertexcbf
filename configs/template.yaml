@@ -147,10 +147,30 @@ training:
   epochs: 10000
   lr: 0.001
 
+  # Random seed for weight init and training (python/numpy/torch RNGs).
+  # Overridden by --seed on the CLI, which also routes artifacts to
+  # <checkpoint_dir>/seed_<n>/. Leave unset for nondeterministic init.
+  # seed: 0
+
   # Learning-rate schedule: decay lr by lr_gamma at each milestone epoch.
   # Set to [] for no decay.
   lr_milestones: [10000]
   lr_gamma: 0.1
+
+  # Optional early stopping, triggered only by a collapse to a trivial
+  # solution: if V(x) = c(x) - r(x) certifies nothing (max V < collapse_max_value)
+  # or has gone constant in x (spread < collapse_const_tol), and stays that
+  # way for collapse_patience epochs, training stops there and writes final.pt
+  # exactly as a full-length run would. Such a run sits at a global minimum of
+  # the PDE loss with no gradient left to escape on, so the remaining epochs
+  # are wasted. A run that is merely descending slowly -- e.g. just after an
+  # lr_milestone -- is NOT stopped: the test reads the certificate, not the
+  # loss. Off by default (collapse_patience: 0); --no-early-stop on the CLI
+  # forces it off regardless of the config.
+  # collapse_patience: 1000
+  # collapse_check_every: 50
+  # collapse_max_value: 0.0
+  # collapse_const_tol: 1.0e-4
 
   # Loss weighting mode.  Options:
   #   "fixed"      — total = pde_weight * pde_loss + (1 - pde_weight) * data_loss
@@ -232,9 +252,9 @@ validation:
 # Default checkpoint_dir is checkpoints/<METHOD_GROUP>/<system_name>, where
 # METHOD_GROUP is derived automatically from the data section:
 #   NO_DATA — data.enabled: false (or --no-data on the CLI)
-#   FC_DATA — data.method ∈ {mppi}
+#   FC_DATA — data.method ∈ {mppi, cem, icem, random_shooting}
 #   VRC_DATA — data.method ∈ {beam_search, stochastic_beam_search,
-#                            branch_and_bound}
+#                            branch_and_bound, cem_discrete}
 # Precomputed supervision data is similarly routed to
 # data/precomputed/<METHOD_GROUP>/<system_name>.pt.
 output:

@@ -83,6 +83,16 @@ class Trainer:
       Provide milestone (epoch, weight) pairs via ``pde_weight_milestones``.
       If no milestones are given, the weight stays constant at ``pde_weight``.
 
+    Optionally (``collapse_patience > 0``), training stops early once the
+    model has collapsed to a trivial certificate — an empty safe set, or a
+    ``V_Θ`` with no state dependence — and stayed there for
+    ``collapse_patience`` epochs.  Such a run has nothing left to learn, so
+    the remaining epochs are wasted; a run that is merely descending slowly,
+    for instance just after a learning-rate drop, is left alone.  The run
+    then writes ``final.pt`` exactly as a full-length run would, so
+    downstream validation and evaluation are unaffected; ``epochs_run`` and
+    ``stopped_early`` record what happened.  The check is off by default.
+
     Args:
         dynamics: Control-affine system used to build the PDE grid.
         model: MLP that outputs the residual ``r_Θ(x)``, shape ``(N, 1)``.
@@ -110,6 +120,17 @@ class Trainer:
             checkpointing.
         checkpoint_every: Save a checkpoint every this many epochs.
         resume_from: Path to a checkpoint file to resume from.
+        collapse_patience: How long, in epochs, a trivial ``V_Θ`` must persist
+            before training stops.  ``0`` or ``None`` (default) trains the
+            full ``epochs`` unconditionally.
+        collapse_check_every: Epochs between collapse checks.  Each check is
+            one no-grad forward pass over the collocation states.
+        collapse_max_value: A run counts as collapsed while
+            ``max_x V_Θ(x)`` stays below this, i.e. the predicted safe set is
+            empty and ``ρ_FS`` would be undefined at validation.
+        collapse_const_tol: A run also counts as collapsed while the spread
+            of ``V_Θ`` over the collocation states falls below this, i.e. the
+            certificate has become constant in ``x``.
     """
 
     # Auto-batching tuning knobs.  Defaults are conservative-but-effective on
@@ -139,11 +160,28 @@ class Trainer:
         checkpoint_dir: Optional[str] = None,
         checkpoint_every: int = 1000,
         resume_from: Optional[str] = None,
+        collapse_patience: int | None = None,
+        collapse_check_every: int = 50,
+        collapse_max_value: float = 0.0,
+        collapse_const_tol: float = 1e-4,
     ) -> None:
         if pde_weight_mode not in ("fixed", "normalized", "scheduled"):
             raise ValueError(
                 f"pde_weight_mode must be 'fixed', 'normalized', or 'scheduled', "
                 f"got '{pde_weight_mode}'"
+            )
+        if collapse_patience is not None and collapse_patience < 0:
+            raise ValueError(
+                f"collapse_patience must be >= 0 (0 or None disables early "
+                f"stopping), got {collapse_patience}"
+            )
+        if collapse_check_every < 1:
+            raise ValueError(
+                f"collapse_check_every must be >= 1, got {collapse_check_every}"
+            )
+        if collapse_const_tol < 0.0:
+            raise ValueError(
+                f"collapse_const_tol must be >= 0, got {collapse_const_tol}"
             )
 
         self.dynamics = dynamics
@@ -161,10 +199,22 @@ class Trainer:
         self.log_every = log_every
         self.checkpoint_dir = checkpoint_dir
         self.checkpoint_every = checkpoint_every
+        self.collapse_patience = collapse_patience or 0
+        self.collapse_check_every = collapse_check_every
+        self.collapse_max_value = collapse_max_value
+        self.collapse_const_tol = collapse_const_tol
 
         self._start_epoch = 0
         self._loss_history: list[float] = []
         self._best_loss: float = float("inf")
+
+        # Set by train(): epoch the run actually ended on, and whether it ended
+        # on the collapse criterion rather than exhausting self.epochs.
+        # _collapse_since is the epoch the current collapsed streak began, or
+        # None while V_Theta still looks non-trivial.
+        self.epochs_run: int = 0
+        self.stopped_early: bool = False
+        self._collapse_since: int | None = None
 
         # Optimizer and scheduler
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -195,6 +245,16 @@ class Trainer:
         self._use_pde: bool = (
             self._states_pde is not None and self._states_pde.shape[0] > 0
         )
+
+        # States the collapse check evaluates V_Theta on.  The PDE collocation
+        # set already covers the state space and is resident, so reuse it;
+        # fall back to the supervision states when the PDE term is disabled.
+        if self._use_pde:
+            self._collapse_states = self._states_pde.detach()
+        elif data_states is not None and data_states.shape[0] > 0:
+            self._collapse_states = data_states.detach()
+        else:
+            self._collapse_states = None
 
         # Auto-batching state: stays disabled while the full set fits in GPU
         # memory.  On the first CUDA OOM (either while precomputing
@@ -269,6 +329,7 @@ class Trainer:
                 f"ratio: {L_pde_0 / (L_data_0 + 1e-12):.3f}"
             )
 
+        last_epoch = self._start_epoch
         for epoch in range(self._start_epoch, self.epochs):
             pde_scale, data_scale = self._loss_scales(
                 epoch, use_pde, use_data, L_pde_0, L_data_0
@@ -278,6 +339,7 @@ class Trainer:
             )
             total_val = pde_scale * loss_pde_val + data_scale * loss_data_val
             self._loss_history.append(total_val)
+            last_epoch = epoch + 1
 
             if (epoch + 1) % self.log_every == 0:
                 self._log(epoch, total_val, loss_pde_val, loss_data_val)
@@ -292,8 +354,29 @@ class Trainer:
             ):
                 self._save_checkpoint(epoch + 1)
 
+            # Collapsed to a trivial certificate and stayed there: nothing
+            # left to learn, so stop and let the final checkpoint below stand
+            # in for the one a full-length run would have written.
+            if self.collapse_patience and (epoch + 1) % self.collapse_check_every == 0:
+                reason = self._collapse_reason()
+                if reason is None:
+                    self._collapse_since = None
+                elif self._collapse_since is None:
+                    self._collapse_since = epoch + 1
+                elif (epoch + 1) - self._collapse_since >= self.collapse_patience:
+                    self.stopped_early = True
+                    if (epoch + 1) % self.log_every != 0:  # not already logged
+                        self._log(epoch, total_val, loss_pde_val, loss_data_val)
+                    print(
+                        f"Early stop at epoch {last_epoch}/{self.epochs}: "
+                        f"collapsed to a trivial solution — {reason}, held "
+                        f"since epoch {self._collapse_since}."
+                    )
+                    break
+
+        self.epochs_run = last_epoch
         if self.checkpoint_dir is not None:
-            self._save_checkpoint(self.epochs, tag="final")
+            self._save_checkpoint(last_epoch, tag="final")
 
         return self._loss_history
 
@@ -697,6 +780,50 @@ class Trainer:
                 ).item()
 
         return L_pde_0, L_data_0
+
+    def _collapse_reason(self) -> str | None:
+        """How ``V_Θ`` is currently trivial, or ``None`` if it is not.
+
+        Two degenerate certificates end a run, both read off
+        ``V_Θ(x) = c(x) - r_Θ(x)`` over the collocation states:
+
+        * *empty safe set* — ``max_x V_Θ(x)`` is below ``collapse_max_value``,
+          so nothing is certified safe and ``ρ_FS`` is undefined at validation;
+        * *constant certificate* — ``V_Θ`` varies by less than
+          ``collapse_const_tol`` across the state space.  A constant
+          ``V_Θ ≤ min c`` zeroes both branches of the HJB-VI, so it is a global
+          minimiser of the PDE loss with no gradient left to escape on.
+
+        Judging the certificate rather than the loss keeps this scale-free: a
+        run whose loss merely stopped moving after a learning-rate drop is
+        still descending in a useful direction and is left to finish.  A NaN
+        ``V_Θ`` compares False in both tests, so a diverged run is never
+        mistaken for a collapsed one.
+        """
+        states = self._collapse_states
+        if states is None:
+            return None
+        step = self._pde_chunk_size if self._chunked else None
+        step = step or states.shape[0]
+        v_min, v_max = float("inf"), float("-inf")
+        with torch.no_grad():
+            for start in range(0, states.shape[0], step):
+                block = states[start : start + step]
+                values = self.constr_fn(block) - self.model(block)
+                v_min = min(v_min, values.min().item())
+                v_max = max(v_max, values.max().item())
+
+        if v_max < self.collapse_max_value:
+            return (
+                f"predicted safe set empty (max V = {v_max:.3e} < "
+                f"{self.collapse_max_value:.3e})"
+            )
+        if v_max - v_min < self.collapse_const_tol:
+            return (
+                f"V constant in x (spread {v_max - v_min:.3e} < "
+                f"{self.collapse_const_tol:.3e})"
+            )
+        return None
 
     def _log(self, epoch: int, total: float, pde: float, data: float) -> None:
         print(

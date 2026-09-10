@@ -55,7 +55,7 @@ constraint:
 # (height at nominal stance 0.3 m, level roll, zero linear/yaw velocity).
 
 data:
-  enabled: false
+  enabled: true
   sampling: random
   num_samples: 600000
   method: stochastic_beam_search

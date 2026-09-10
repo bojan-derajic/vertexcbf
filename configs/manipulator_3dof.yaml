@@ -40,7 +40,7 @@ constraint:
     alpha: 20.0            # softmin over the two link distances
 
 data:
-  enabled: false
+  enabled: true
   sampling: random
   num_samples: 600000
   method: beam_search

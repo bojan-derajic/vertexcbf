@@ -1,0 +1,8 @@
+# The Dockerfile only needs requirements.txt: the repo is bind-mounted at
+# /workspace when the container runs (scripts/train_all.sh, .devcontainer),
+# so nothing else belongs in the build context. Without this, the daemon
+# receives ~2.4 GB of checkpoints/, data/ and .git on every build.
+#
+# If the Dockerfile ever starts COPYing source, un-ignore it here too.
+*
+!requirements.txt

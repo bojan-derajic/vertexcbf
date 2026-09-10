@@ -48,10 +48,11 @@ model:
 training:
   epochs: 10000
   lr: 0.001
+  # seed: 0  # override on the CLI with --seed for multi-seed runs
   lr_milestones: [7000]
   lr_gamma: 0.1
-  pde_weight_mode: normalized  # fixed | normalized | scheduled
-  # pde_weight: 0.2
+  pde_weight_mode: fixed  # fixed | normalized | scheduled
+  pde_weight: 0.3
   # pde_weight_milestones: [[5000, 0.9], [8000, 1.0]]
 
 validation:
