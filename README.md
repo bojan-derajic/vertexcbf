@@ -19,7 +19,7 @@ value function of a control-affine system and uses it as a CBF. Three ingredient
   tree search over vertex sequences — no PDE solver, no continuous trajectory optimisation.
 
 The repo ships the library, YAML configs for the 15 systems of the paper, CLI scripts for
-training / evaluation, and a tutorial notebook. Full-control sampling-based baselines
+training / evaluation, and two example notebooks. Full-control sampling-based baselines
 (MPPI, CEM, iCEM, random shooting) are included for comparison.
 
 ---
@@ -47,7 +47,7 @@ Requires Python ≥ 3.9 and PyTorch ≥ 2.0 (CUDA strongly recommended for train
 git clone https://github.com/bojan-derajic/vertexcbf.git
 cd vertexcbf
 pip install -e .            # library + scripts
-pip install -e ".[dev]"     # + Jupyter, for the notebook
+pip install -e ".[dev]"     # + Jupyter, for the notebooks
 ```
 
 `requirements.txt` pins an exact environment (CUDA 12.4 build of PyTorch). A `Dockerfile` and
@@ -119,9 +119,14 @@ samples = stratified_sample_by_predicted_cbf(dynamics, constr_fn, model, num_per
 print(validate_cbf(dynamics, samples["states"], constr_fn, model, T=5.0, dt=0.01)["stratified_metrics"])
 ```
 
-**[`notebooks/examples.ipynb`](notebooks/examples.ipynb)** walks through this end to end with
-plots, and additionally shows how to use the learned CBF in a safety filter, how to load
-checkpoints produced by the scripts, and how to plug in your own system and constraint.
+Two notebooks in [`examples/`](examples/) run this end to end with plots — problem, label
+generation and training, result, and use of the trained CBF in a QP safety filter — each
+checked against the analytical safe set:
+
+- **[`examples/double_integrator.ipynb`](examples/double_integrator.ipynb)** — 1-D double
+  integrator with a position limit.
+- **[`examples/inverted_pendulum.ipynb`](examples/inverted_pendulum.ipynb)** — torque-limited
+  inverted pendulum, where the safe set is a thin tilted lens well inside the constraint band.
 
 ---
 
@@ -140,7 +145,7 @@ vertexcbf/
 │   └── config_utils.py  build_* helpers and registries for the YAML configs
 ├── configs/             one YAML per system (paper hyperparameters) + template.yaml
 ├── scripts/             train.py, evaluate.py, precompute_data.py, train_all.sh, build_image.sh
-└── notebooks/           examples.ipynb (tutorial)
+└── examples/            double_integrator.ipynb, inverted_pendulum.ipynb
 ```
 
 All methods in `trajopt/` solve the same finite-horizon problem
@@ -343,7 +348,7 @@ class MySystem(ControlAffine):
 
 **Constraint** — any function `(..., nx) -> (..., 1)`, positive inside the allowed set. Put it in
 `vertexcbf/constraints/`, export it from `vertexcbf/constraints/__init__.py`, and add it to
-`CONSTR_REGISTRY` in `vertexcbf/config_utils.py`. Section 8 of the notebook shows both, inline.
+`CONSTR_REGISTRY` in `vertexcbf/config_utils.py`.
 
 ---
 
