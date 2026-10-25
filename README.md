@@ -36,6 +36,7 @@ training / evaluation, and two example notebooks. Full-control sampling-based ba
 - [Constraint functions](#constraint-functions)
 - [Adding a system or constraint](#adding-a-system-or-constraint)
 - [Citation](#citation)
+- [License](#license)
 
 ---
 
@@ -362,3 +363,9 @@ class MySystem(ControlAffine):
   year      = {2026}
 }
 ```
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE).
